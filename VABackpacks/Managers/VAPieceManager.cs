@@ -24,7 +24,9 @@ namespace VerdantsAscent.Managers
 
             MyMod.piecePrefabs.Clear();
             var allAssets = MyMod.assetBundle.GetAllAssetNames();
-            Debug.Log($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets: {string.Join(", ", allAssets)}");
+            Debug.Log($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets");
+            if (ConfigManager.Instance?.configVerboseLogging?.Value ?? false)
+                Debug.Log($"{MyMod.PluginName}: bundle assets: {string.Join(", ", allAssets)}");
 
             int failed = 0;
             foreach (var pieceName in PieceNames)

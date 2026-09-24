@@ -1,6 +1,6 @@
 {
     "name":  "VABackpacks",
-    "version_number":  "1.0.13",
+    "version_number":  "1.0.14",
     "website_url":  "https://github.com/fire-VA/VABackpacks",
     "description":  "Part of the Fires mod family for Valheim.",
     "dependencies":  [

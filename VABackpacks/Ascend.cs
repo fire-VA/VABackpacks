@@ -21,7 +21,7 @@ namespace VerdantsAscent
         public static readonly Harmony harmony = new Harmony("com.Fire.VA_Backpacks");
         public const string PluginGUID = "com.Fire.VA_Backpacks";
         public const string PluginName = "VABackpacks";
-        public const string PluginVersion = "1.0.13";
+        public const string PluginVersion = "1.0.14";
 
         public static AssetBundle assetBundle;
         public static readonly List<GameObject> piecePrefabs = new List<GameObject>();
