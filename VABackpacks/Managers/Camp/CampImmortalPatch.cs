@@ -79,5 +79,18 @@ namespace VerdantsAscent.Managers.Camp
         {
             return !IsImmortal(__instance);   // skip vanilla when immortal
         }
+
+        // 1.0.35 (Fire: remove and move camp pieces with the hammer while decorating): a camp's own piece came with the bag,
+        // not from the player's materials, so removing it gives nothing back (else deploy, remove, pack, repeat farms wood
+        // and stone). Removal itself is vanilla's; the pack-up records what is left.
+        [HarmonyPatch(typeof(Piece), nameof(Piece.DropResources))]
+        [HarmonyPrefix]
+        private static bool Piece_DropResources_Prefix(Piece __instance)
+        {
+            var wnt = __instance != null ? __instance.GetComponent<WearNTear>() : null;
+            if (wnt == null || !IsImmortal(wnt)) return true;
+            Debug.Log($"[VABackpacks] camp piece removed: {Utils.GetPrefabName(__instance.gameObject)} (a camp piece: no materials back; the next deploy places it fresh)");
+            return false;
+        }
     }
 }

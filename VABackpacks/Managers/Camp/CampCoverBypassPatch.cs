@@ -67,5 +67,45 @@ namespace VerdantsAscent.Managers.Camp
             }
             return true;
         }
+
+        /// <summary>
+        /// Fire (2026-09-29): "the bed and work bench should bypass roof checks for camps"; last night the camp's workbench
+        /// refused with "needs a roof". Vanilla `CraftingStation.CheckUsable` wants the roof check point under a roof with
+        /// ≥ 70 % cover. Inside a camp radius the roof and cover part is skipped; a station that also needs a fire still
+        /// needs one (vanilla's own second half, kept as is).
+        /// </summary>
+        [HarmonyPatch(typeof(CraftingStation), nameof(CraftingStation.CheckUsable))]
+        [HarmonyPrefix]
+        private static bool CraftingStation_CheckUsable_Prefix(CraftingStation __instance, Player player, bool showMessage, ref bool __result)
+        {
+            if (__instance == null || player == null) return true;
+            if (!ConfigManager.Instance.configCampEnabled.Value) return true;
+            if (!__instance.m_craftRequireRoof) return true;
+            Vector3 at = __instance.m_roofCheckPoint != null ? __instance.m_roofCheckPoint.position : __instance.transform.position;
+            if (!BackpackCampRegistry.IsPointInAnyCamp(at)) return true;
+            if (!__instance.m_craftRequireFire || player.NoCostCheat() || __instance.m_haveFire)
+            {
+                __result = true;
+                return false;
+            }
+            if (showMessage) player.Message(MessageHud.MessageType.Center, "$msg_needfire");
+            __result = false;
+            return false;
+        }
+
+        /// <summary>
+        /// Fire (2026-09-29): "You can sleep in the bed when it's raining". Vanilla `Bed.CheckWet` refuses while the player
+        /// has the Wet status effect ("$msg_bedwet"). A bed inside a camp radius skips it; the camp is the shelter.
+        /// </summary>
+        [HarmonyPatch(typeof(Bed), "CheckWet")]
+        [HarmonyPrefix]
+        private static bool Bed_CheckWet_Prefix(Bed __instance, ref bool __result)
+        {
+            if (__instance == null) return true;
+            if (!ConfigManager.Instance.configCampEnabled.Value) return true;
+            if (!BackpackCampRegistry.IsPointInAnyCamp(__instance.transform.position)) return true;
+            __result = true;
+            return false;
+        }
     }
 }

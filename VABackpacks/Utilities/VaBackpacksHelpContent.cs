@@ -33,14 +33,15 @@ namespace VerdantsAscent.Utilities
             w.Header("Backpacks");
             w.Paragraph("Real backpacks with real storage: the Small Bag, Day Bag, and Explorer " +
                 "Bag wear on your shoulder, and the Hobo Stick and Fires Wizard's Staff carry " +
-                "their load in hand. Recipes are on the items themselves — check your crafting menu.");
+                "their load in hand. Craft them at the workbench, or find one in chests: the Small Bag " +
+                "in the Meadows, the Day Bag in the Black Forest, the Explorer Bag in the Swamp.");
             w.Divider();
 
             w.SubHeader("Using a Bag");
             w.Bullet("Equip it, then press B (Backpacks.OpenHotkey) to open its storage.");
-            w.Bullet("Default capacity is 24 slots per bag (server-tunable per bag type).");
-            w.Bullet("Bags coexist with capes — wearing both works; the cape just wins the " +
-                "visual on your back.");
+            w.Bullet("Storage by bag: Small 5x2, Day 6x3, Explorer 7x4, Hobo Stick and Staff 5x3 " +
+                "(server-tunable per bag type).");
+            w.Bullet("The worn bag shows on your back, cape or not.");
             w.Bullet("Wear multiple bags (shoulder bag + Hobo Stick in hand) and each shows its " +
                 "own storage panel when VAInventory is installed.");
             w.Divider();
@@ -57,6 +58,13 @@ namespace VerdantsAscent.Utilities
             w.Bullet("Feather fall, extra carry strength");
             w.Divider();
 
+            w.SubHeader("Special Slots (quality 2 and up)");
+            w.Bullet("Small Bag: a tool slot. Day Bag: tool + resources. Explorer, Hobo Stick, Staff: " +
+                "tool + resources + bypass.");
+            w.Bullet("Resources in the resources slot weigh a quarter.");
+            w.Bullet("The bypass slot carries one non-teleportable item through portals.");
+            w.Divider();
+
             w.SubHeader("Rules");
             w.Bullet("No backpack inside a backpack.");
             w.Bullet("A bag can't be quick-transferred into itself.");
@@ -70,7 +78,7 @@ namespace VerdantsAscent.Utilities
             w.Divider();
 
             w.SubHeader("Deploying");
-            w.Bullet("Drop a backpack, look at it, and HOLD Shift+B for 3 seconds.");
+            w.Bullet("Drop a backpack, look at it, and HOLD E for 3 seconds (holding Shift+B works too).");
             w.Bullet("The camp unpacks: a campfire, the backpack itself standing open as your " +
                 "chest (with everything inside), a workbench, bed, chair, woodpile, and cooking " +
                 "station — arranged around the fire, terrain smoothed underneath.");
@@ -81,9 +89,11 @@ namespace VerdantsAscent.Utilities
 
             w.SubHeader("Packing Up");
             w.Bullet("Look at your camp's chest and HOLD Shift+B again — the camp folds back " +
-                "into the bag, terrain restored, nothing left behind.");
+                "into the bag, terrain restored, nothing left behind. The bag goes back into " +
+                "your inventory (or at your feet if it's full).");
+            w.Bullet("While camped, the bag leans against the chest so you can spot it.");
             w.Bullet("One camp per character.");
-            w.Bullet("Guildmates can use your camp chest when the guild system is running.");
+            w.Bullet("Guildmates can use your camp chest when FiresGuilds is installed.");
         }
 
         private static void BuildConfig(FiresCore.Help.HelpContentWriter w)
@@ -92,9 +102,10 @@ namespace VerdantsAscent.Utilities
             w.SubHeader("Per-Bag Sections (Backpack.<prefab>)");
             w.Paragraph("SmallBag_va, DayBag_va, ExplorerBag_va, HoboStick, StaffFiresWizard — " +
                 "each with:");
-            w.Bullet("Rows / Columns — storage size (default 4x6)");
+            w.Bullet("Rows / Columns — storage size");
             w.Bullet("WeightReductionMultiplier — contents weight factor (standalone mode only; " +
                 "with VAInventory's panels, contents weigh normally)");
+            w.Bullet("Defaults: Small 5x2, Day 6x3, Explorer 7x4, Hobo Stick / Staff 5x3");
             w.Bullet("ColdResistance / WetResistance / FeatherFall / StrengthBonus — perks");
             w.Bullet("CampBlueprint (+YOffset) — a PlanBuild blueprint replaces the procedural " +
                 "camp layout for this bag");
@@ -113,9 +124,9 @@ namespace VerdantsAscent.Utilities
                 "a blueprint camp");
             w.AdminDivider();
 
-            w.Paragraph("Sync note: only EnableRecipes and VerboseLogging are server-synced — " +
-                "bag capacities, perks, and camp layout are read from each client's config, so " +
-                "keep the modpack's cfg canonical if you want uniform bags.");
+            w.Paragraph("Sync note: recipes, upgrades, chest loot, the EnableRecipes lock and " +
+                "VerboseLogging are server-synced — bag capacities, perks, and camp layout are read " +
+                "from each client's config, so keep the modpack's cfg canonical if you want uniform bags.");
         }
     }
 }

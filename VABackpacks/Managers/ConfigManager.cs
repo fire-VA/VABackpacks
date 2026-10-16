@@ -16,7 +16,7 @@ namespace VerdantsAscent.Managers
         private static ConfigManager _instance;
         public static ConfigManager Instance => _instance ?? (_instance = new ConfigManager());
         public bool _isProcessingSync = false;
-        private FileSystemWatcher configWatcher;
+        private FileSystemWatcher configWatcher;
         // Stamped on every ConfigEntry write we make (SettingChanged fires on .Value sets and
         // SaveOnConfigSet rewrites the .cfg on the same set) - lets the watcher tell our own
         // file writes from an external/admin edit, so interactive UI writes can't loop us into
@@ -99,7 +99,8 @@ namespace VerdantsAscent.Managers
         public void Initialize(ConfigFile config)
         {
             // ────── General Settings ──────
-            configVerboseLogging = config.Bind("General", "VerboseLogging", true,
+            // Off by default (1.0.17; Fire, 2026-10-01: cut verbose logging; every other Fires mod defaults it off).
+            configVerboseLogging = config.Bind("General", "VerboseLogging", false,
                 "Enable detailed debug logs.");
             configEnableRecipes = config.Bind("General", "EnableRecipes", true,
                 "Master switch for all custom recipes.");
@@ -156,6 +157,7 @@ namespace VerdantsAscent.Managers
                 "Backpacks.Camp", "BedPrefab", "rawood_bed_bal,bed",
                 "Comma-separated fallback chain of bed prefab names. Tries each in order, uses the first that's registered with ZNetScene. Default prefers Balrond's Amazing Nature 'rawood_bed_bal' when that mod is loaded, falls back to vanilla 'bed'. Roof check is bypassed inside the camp radius.");
 
+            Camp.CampGround.Bind(config);   // 1.0.70: camp ground placement (always on since 1.0.72); GroundTrueMaxSpread tolerance
             configCampWoodpilePrefab = config.Bind(
                 "Backpacks.Camp", "WoodpilePrefab", "wood_stack",
                 "ZNetScene prefab for the decorative wood pile. Set to empty string to skip.");
@@ -221,11 +223,19 @@ namespace VerdantsAscent.Managers
             {
                 string section = $"Backpack.{prefabName}";
 
-                configBackpackRows[prefabName] = config.Bind(section, "Rows", 4,
+                // 1.0.19 (Fire 10-07): a grid per tier (columns x rows) - Small 5x2, Day 6x3, Explorer 7x4, the camp bags 5x3;
+                // an upgrade (quality 2+) adds special slots, never grid. Others' bags keep the old 6x4.
+                (int cols, int rows) grid = DefaultGrid(prefabName);
+                configBackpackRows[prefabName] = config.Bind(section, "Rows", grid.rows,
                     new ConfigDescription($"Number of rows in {prefabName} inventory grid.", new AcceptableValueRange<int>(1, 20)));
 
-                configBackpackColumns[prefabName] = config.Bind(section, "Columns", 6,
+                configBackpackColumns[prefabName] = config.Bind(section, "Columns", grid.cols,
                     new ConfigDescription($"Number of columns in {prefabName} inventory grid.", new AcceptableValueRange<int>(1, 20)));
+                // 1.0.51 (R-1013J bag_resize_test): an in-game change (Config Manager, the server's sync) is a self-write, which the
+                // file watcher skips on purpose, so the bag kept its load-time size until a restart. The cached size follows the
+                // entry now; the bag takes it on its next equip (Fire 10-13: a worn bag resizes on the next open / equip).
+                configBackpackRows[prefabName].SettingChanged += (_, __) => BackpackManager.RefreshGridSizes();
+                configBackpackColumns[prefabName].SettingChanged += (_, __) => BackpackManager.RefreshGridSizes();
 
                 configBackpackWeightReduction[prefabName] = config.Bind(section, "WeightReductionMultiplier", 0.5f,
                     new ConfigDescription($"Multiplier for {prefabName} contents weight (0.5 = 50% reduction).", new AcceptableValueRange<float>(0f, 1f)));
@@ -276,6 +286,19 @@ namespace VerdantsAscent.Managers
             SetupConfigWatcher(config);
         }
 
+        private static (int cols, int rows) DefaultGrid(string prefabName)
+        {
+            switch (prefabName)
+            {
+                case "SmallBag_va": return (5, 2);
+                case "DayBag_va": return (6, 3);
+                case "ExplorerBag_va": return (7, 4);
+                case "HoboStick":
+                case "StaffFiresWizard": return (5, 3);
+                default: return (6, 4);
+            }
+        }
+
         private void SetupConfigWatcher(ConfigFile config)
         {
             if (configWatcher != null) return;
@@ -295,14 +318,14 @@ namespace VerdantsAscent.Managers
             };
             configWatcher.Changed += (sender, e) =>
             {
-                if (_isShuttingDown || _isProcessingSync) return;
+                if (_isShuttingDown || _isProcessingSync) return;
                 if (IsRecentSelfWrite()) return;
                 if (_reloadCoroutine != null) return;
                 _reloadCoroutine = MyMod.Instance.StartCoroutine(ReloadConfigAfterDelay());
             };
             configWatcher.Renamed += (sender, e) =>
             {
-                if (_isShuttingDown || _isProcessingSync) return;
+                if (_isShuttingDown || _isProcessingSync) return;
                 if (IsRecentSelfWrite()) return;
                 if (_reloadCoroutine != null) return;
                 _reloadCoroutine = MyMod.Instance.StartCoroutine(ReloadConfigAfterDelay());
@@ -313,7 +336,7 @@ namespace VerdantsAscent.Managers
         {
             yield return new WaitForSeconds(2f);
             if (_isShuttingDown || _isProcessingSync) { _reloadCoroutine = null; yield break; }
-            if ((DateTime.Now - _lastConfigUpdate).TotalMilliseconds < 2000) { _reloadCoroutine = null; yield break; }
+            if ((DateTime.Now - _lastConfigUpdate).TotalMilliseconds < 2000) { _reloadCoroutine = null; yield break; }
             if (IsRecentSelfWrite()) { _reloadCoroutine = null; yield break; }
             _lastConfigUpdate = DateTime.Now;
             Debug.Log($"{MyMod.PluginName}: Config file changed, reloading...");

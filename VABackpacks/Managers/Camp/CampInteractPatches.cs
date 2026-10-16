@@ -37,9 +37,25 @@ namespace VerdantsAscent.Managers.Camp
             if (!BackpackApi.IsBackpack(__instance.m_itemData)) return;
 
             float dur = ConfigManager.Instance.configCampHoldDuration.Value;
-            string key = FormatGestureKey();
-            __result += $"\n[<color=yellow><b>Hold L.Shift+{key}</b></color>] " +
-                        $"Deploy as camp ({dur:F0}s)";
+            __result += $"\n[<color=yellow><b>Hold $KEY_Use</b></color>] Deploy camp ({dur:F0}s)";   // 1.0.19 (Fire 10-07)
+            __result = Localization.instance != null ? Localization.instance.Localize(__result) : __result;
+        }
+
+        /// <summary>
+        /// 1.0.19 (Fire 10-07: hold E deploys the camp, tap E picks up): the first Use press on a dropped backpack is held back
+        /// and handed to BackpackCampManager, which picks it up on release or deploys the camp after the hold time.
+        /// </summary>
+        [HarmonyPatch(typeof(ItemDrop), nameof(ItemDrop.Interact))]
+        [HarmonyPrefix]
+        private static bool ItemDrop_Interact_Prefix(ItemDrop __instance, Humanoid character, bool repeat, ref bool __result)
+        {
+            if (BackpackCampManager.AllowPickup || repeat) return true;
+            if (!ConfigManager.Instance.configCampEnabled.Value) return true;
+            if (__instance == null || __instance.m_itemData == null || character != Player.m_localPlayer) return true;
+            if (!BackpackApi.IsBackpack(__instance.m_itemData)) return true;
+            BackpackCampManager.BeginHoldUse(__instance);
+            __result = true;
+            return false;
         }
 
         // ── Container hover-text injection ────────────────────────────

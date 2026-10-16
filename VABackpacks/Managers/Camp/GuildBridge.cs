@@ -1,5 +1,5 @@
-// GuildBridge — soft-reference to FiresNPCs / Verdant's Ascent's
-// GuildAPI. Lets the camp system grant guildmates access to a camp
+// GuildBridge — soft-reference to FiresGuilds' GuildAPI (FiresRPGmaker's
+// before 0.0.528). Lets the camp system grant guildmates access to a camp
 // chest without VABackpacks taking a hard load-order dependency on
 // FiresNPCs.
 //
@@ -23,6 +23,16 @@ namespace VerdantsAscent.Managers.Camp
         public const string FIRES_ASSEMBLY_NAME = "FiresRPGmaker";
         public const string GUILD_API_FQN       = "VerdantsAscent.Modules.Guilds.GuildAPI";
 
+        public const string GUILDS_ASSEMBLY_NAME = "FiresGuilds";
+        public const string GUILDS_API_FQN       = "FiresGuilds.Modules.Guilds.GuildAPI";
+
+        private static Type FindType(string assemblyName, string typeName)
+        {
+            var asm = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a != null && a.GetName().Name == assemblyName);
+            return asm?.GetType(typeName);
+        }
+
         private static MethodInfo _areGuildmates;
         private static bool _initAttempted;
 
@@ -40,11 +50,8 @@ namespace VerdantsAscent.Managers.Camp
 
             try
             {
-                var asm = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(a => a != null && a.GetName().Name == FIRES_ASSEMBLY_NAME);
-                if (asm == null) { IsAvailable = false; return; }
-
-                var apiType = asm.GetType(GUILD_API_FQN);
+                // Guilds live in FiresGuilds now; FiresRPGmaker (before 0.0.528) is the fallback.
+                Type apiType = FindType(GUILDS_ASSEMBLY_NAME, GUILDS_API_FQN) ?? FindType(FIRES_ASSEMBLY_NAME, GUILD_API_FQN);
                 if (apiType == null) { IsAvailable = false; return; }
 
                 _areGuildmates = AccessTools.Method(apiType, "AreGuildmates",
@@ -52,7 +59,7 @@ namespace VerdantsAscent.Managers.Camp
                 IsAvailable = _areGuildmates != null;
 
                 if (IsAvailable)
-                    Debug.Log("[VABackpacks] GuildBridge initialized — guildmates can access each other's camp chests.");
+                    Debug.Log($"[VABackpacks] GuildBridge initialized via {apiType.Assembly.GetName().Name} — guildmates can access each other's camp chests.");
             }
             catch (Exception ex)
             {

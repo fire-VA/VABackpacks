@@ -22,6 +22,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
@@ -74,6 +75,7 @@ namespace VerdantsAscent.Managers.Camp
         private void Update()
         {
             if (Player.m_localPlayer == null) return;
+            if (!_pinsCleaned && Minimap.instance != null) { _pinsCleaned = true; CleanCampPins(Player.m_localPlayer, null, "load"); }
             if (!ConfigManager.Instance.configCampEnabled.Value) return;
 
             // Don't run the gesture while menus / chat / other UI are eating input.
@@ -95,6 +97,9 @@ namespace VerdantsAscent.Managers.Camp
             // immediate deploy without needing the 3-second hold.
             HoboStickAttackPatch.TryHandleHoboStickMmb();
 
+            // 1.0.19 (Fire 10-07): HOLD E on a dropped backpack deploys its camp, tap E picks it up.
+            if (HandleHoldUse()) return;
+
             // ── Refresh hovered camp target on a throttled cadence ────
             if (Time.unscaledTime >= _nextRaycastAt)
             {
@@ -109,7 +114,8 @@ namespace VerdantsAscent.Managers.Camp
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             KeyCode gestureKey = ConfigManager.Instance.configCampGestureKey.Value;
             bool secondKey = gestureKey != KeyCode.None && Input.GetKey(gestureKey);
-            bool gestureHeld = shift && secondKey;
+            // 1.0.43: never while a text field has input (the hammer filter, chat, a Fires panel).
+            bool gestureHeld = shift && secondKey && !BackpackManager.IsFiresInputCaptured();
 
             if (!gestureHeld)
             {
@@ -121,9 +127,18 @@ namespace VerdantsAscent.Managers.Camp
             if (_deployTarget == null && _packTarget == null)
             {
                 _holdStart = 0f;
-                _fired = false;
+                // 1.0.46: say once per hold why nothing armed (no bag or camp chest looked at, within reach, or ring).
+                if (!_noTargetLogged)
+                {
+                    _noTargetLogged = true;
+                    GestureLog.LogDebug($"camp gesture held: no target (no backpack drop or camp chest in the crosshair or within {ConfigManager.Instance.configCampDeployRadius.Value:0.#} m, and not inside one of your camp rings)");
+                }
                 return;
             }
+
+            // 1.0.34 (Fire: "Packing camp... 0.6s" kept rolling after the pack): once the action fired, the held keys do
+            // nothing more until they are let go; before, the reset right after the action restarted the timer while held.
+            if (_fired) return;
 
             // First frame of the hold → start the timer.
             if (_holdStart <= 0f) _holdStart = Time.unscaledTime;
@@ -144,6 +159,8 @@ namespace VerdantsAscent.Managers.Camp
                     $"Packing camp... {remaining:F1}s");
             }
 
+            if (_deployTarget != null && !_fired) RequestDropOwnership(_deployTarget);   // 1.0.25: the deploy takes the drop as its owner
+
             if (!_fired && elapsed >= duration)
             {
                 _fired = true;
@@ -156,7 +173,7 @@ namespace VerdantsAscent.Managers.Camp
                 {
                     Debug.LogError($"[VABackpacks] Camp action failed: {ex}");
                 }
-                ResetGesture();
+                // _fired stays set until the keys are released (ResetGesture on release).
             }
         }
 
@@ -273,6 +290,21 @@ namespace VerdantsAscent.Managers.Camp
                 }
             }
 
+            // 1.0.46 ([visual]'s camp_carry: Shift+B by the camp did nothing, the tester was past 3 m from the chest and not
+            // looking at it): the owner standing inside their own camp's save ring is targeting that camp.
+            if (newDeploy == null && newPack == null && Player.m_localPlayer != null)
+            {
+                var me = Player.m_localPlayer;
+                Vector3 pos = me.transform.position;
+                foreach (var m in BackpackCampRegistry.All)
+                {
+                    if (m == null || m.OwnerPlayerId != me.GetPlayerID()) continue;
+                    Vector3 d = pos - CampRing.Centre(m);
+                    float rr = CampRing.Radius(m);
+                    if (d.x * d.x + d.z * d.z <= rr * rr) { newPack = m; break; }
+                }
+            }
+
             // Target switched → reset the timer.
             if (newDeploy != _deployTarget || newPack != _packTarget)
             {
@@ -283,42 +315,296 @@ namespace VerdantsAscent.Managers.Camp
             _packTarget = newPack;
         }
 
+        // ── Hold E on a dropped backpack (1.0.19) ─────────────────────
+        //
+        // Vanilla picks an ItemDrop up on the Use keydown, before any hold could be seen. CampInteractPatches'
+        // ItemDrop.Interact prefix holds that first press back for a backpack (BeginHoldUse) and this loop decides:
+        // let go before the camp hold time = the pickup vanilla would have done (AllowPickup lets it through once);
+        // held for the hold time = the camp, the same DeployFromItemDrop the Shift+key gesture uses.
+        private static ItemDrop _useDrop;
+        private static float _useStart;
+        private static bool _useFired;
+        internal static bool AllowPickup;
+        private const float UseProgressGrace = 0.35f;   // no progress text for an ordinary tap
+
+        internal static void BeginHoldUse(ItemDrop drop)
+        {
+            _useDrop = drop;
+            _useStart = Time.unscaledTime;
+            _useFired = false;
+            // 1.0.25: ask for the drop the vanilla way (ItemDrop.RequestOwn, as a pickup does) while E is held, so the
+            // deploy can take it out of the world as its owner.
+            RequestDropOwnership(drop);
+        }
+
+        private static void RequestDropOwnership(ItemDrop drop)
+        {
+            if (drop == null) return;
+            var nview = drop.GetComponent<ZNetView>();
+            if (nview != null && nview.IsValid() && !nview.IsOwner()) drop.RequestOwn();
+        }
+
+        /// <summary>True while a hold-E is in progress (the Shift+key gesture waits).</summary>
+        private bool HandleHoldUse()
+        {
+            if (_useDrop == null) return false;
+            Player player = Player.m_localPlayer;
+            if (player == null || _useDrop.m_itemData == null) { _useDrop = null; return false; }
+            bool down = ZInput.GetButton("Use") || ZInput.GetButton("JoyUse");
+            float duration = ConfigManager.Instance.configCampHoldDuration.Value;
+            float elapsed = Time.unscaledTime - _useStart;
+            if (!down)
+            {
+                ItemDrop drop = _useDrop;
+                _useDrop = null;
+                if (_useFired) return false;
+                AllowPickup = true;   // a tap: the pickup vanilla would have done
+                var tapView = drop != null ? drop.GetComponent<ZNetView>() : null;
+                ZDOID tapId = tapView != null && tapView.IsValid() ? tapView.GetZDO().m_uid : ZDOID.None;
+                try { drop.Interact(player, false, false); }
+                finally { AllowPickup = false; }
+                // 1.0.31 (round 14 pickup 'drop gone False'): vanilla's pickup destroys the drop as its owner, which only QUEUES
+                // the ZDO (see DestroyedOrQueued); the line says which it is, and the 2 s check confirms it stays gone.
+                if (tapId != ZDOID.None)
+                {
+                    bool gone = DestroyedOrQueued(tapId);
+                    Debug.Log($"[VABackpacks] tap pickup: drop {tapId} {(gone ? "destroyed (gone or queued)" : "still in the world (not owner yet; vanilla asked for it)")}");
+                    if (gone) StartCoroutine(CheckPickupStaysGone(tapId));
+                }
+                return false;
+            }
+            if (_useFired) return true;
+            RequestDropOwnership(_useDrop);   // RequestOwn backs off by itself
+            if (elapsed >= UseProgressGrace)
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.TopLeft, $"Deploying camp... {Mathf.Max(0f, duration - elapsed):F1}s");
+            if (elapsed < duration) return true;
+            _useFired = true;
+            try { DeployFromItemDrop(_useDrop); }
+            catch (Exception ex) { Debug.LogError($"[VABackpacks] Camp deploy (hold E) failed: {ex}"); }
+            return true;
+        }
+
         private void ResetGesture()
         {
             _holdStart = 0f;
             _fired = false;
+            _noTargetLogged = false;
         }
+
+        private static bool _noTargetLogged;
+        private static readonly BepInEx.Logging.ManualLogSource GestureLog = BepInEx.Logging.Logger.CreateLogSource("VABackpacks.CampGesture");
 
         // ── Deploy ────────────────────────────────────────────────────
 
-        private void DeployFromItemDrop(ItemDrop drop)
+        // 1.0.25 (Fire 10-08: a camp from a dropped bag left the bag on the ground too). The drop used to be destroyed as the
+        // LAST step, after the whole camp was built, by claiming its ZDO locally: an exception anywhere in the build, or a
+        // destroy that did not take (a drop another peer owns: ZNetScene.Destroy only deletes the ZDO of an owner, so the
+        // object came back on the next CreateDestroyObjects), left the bag AND the camp with its contents. Now the drop is
+        // taken out of the world FIRST, only by its owner (RequestOwn during the hold, as vanilla's pickup does), and its ZDO
+        // is checked gone before anything is built; a failed build is rolled back and the bag is dropped again, once.
+        private bool DeployFromItemDrop(ItemDrop drop)
         {
             var player = Player.m_localPlayer;
-            if (player == null) return;
-            if (drop == null || drop.m_itemData == null) return;
+            if (player == null) return false;
+            if (drop == null || drop.m_itemData == null) return false;
 
             // One-camp-per-player check
             if (HasActiveCamp(player))
             {
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center,
                     "You already have a camp deployed. Pack it up first.");
-                return;
+                return false;
             }
 
             string backpackPrefab = drop.m_itemData.m_dropPrefab?.name;
             if (string.IsNullOrEmpty(backpackPrefab) || !BackpackApi.IsBackpack(backpackPrefab))
             {
                 Debug.LogWarning($"[VABackpacks] DeployFromItemDrop called on non-backpack: {backpackPrefab}");
-                return;
+                return false;
             }
 
             var cfg = BackpackApi.GetConfig(backpackPrefab);
             if (cfg == null)
             {
                 Debug.LogWarning($"[VABackpacks] Backpack {backpackPrefab} has no config registered.");
-                return;
+                return false;
             }
 
+            var pcfg = ConfigManager.Instance;
+            if (ZNetScene.instance?.GetPrefab(pcfg.configCampCampfirePrefab.Value) == null
+                || ZNetScene.instance?.GetPrefab(pcfg.configCampWorkbenchPrefab.Value) == null
+                || ZNetScene.instance?.GetPrefab(pcfg.configCampContainerPrefab.Value) == null)
+            {
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center,
+                    "Camp deploy failed: prefabs missing (check config).");
+                Debug.LogError("[VABackpacks] Camp deploy: a campfire/workbench/container prefab from the config is missing; nothing deployed.");
+                return false;
+            }
+
+            // 1.0.35 (Fire: "make sure placement checks prevent overlapping pieces"): the camp and its saved layout come back
+            // exactly as packed, so the site must be clear of other buildings; nothing is placed on top of them.
+            {
+                Vector3 fwd = player.transform.forward; fwd.y = 0f;
+                fwd = fwd.sqrMagnitude < 0.01f ? Vector3.forward : fwd.normalized;
+                Vector3 site = drop.transform.position + fwd * pcfg.configCampFireOffsetForward.Value;
+                // 1.0.37 (Fire: refused on empty ground, "65 building piece(s) within 40 m, nearest sfx_unarmed_swing"): the
+                // camp footprint + 2 m, not the level radius, and only real player-built pieces count.
+                float clear = pcfg.configCampRadius.Value + pcfg.configCampMinSeparation.Value + 2f;
+                var near = new System.Collections.Generic.List<Piece>();
+                Piece.GetAllPiecesInRadius(site, clear, near);
+                var blocking = near.Where(IsRealBuilding).ToList();
+                if (blocking.Count > 0)
+                {
+                    var first = blocking.OrderBy(pc => (pc.transform.position - site).sqrMagnitude).First();
+                    Debug.Log($"[VABackpacks] camp deploy refused: {blocking.Count} building piece(s) within {clear:0} m of the camp site, nearest {Utils.GetPrefabName(first.gameObject)} at {Vector3.Distance(first.transform.position, site):0.0} m");
+                    MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, $"Camp NOT deployed: {blocking.Count} building piece(s) within {clear:0} m, nearest {Utils.GetPrefabName(first.gameObject)} {Vector3.Distance(first.transform.position, site):0.0} m away. Move somewhere clear.");
+                    return false;
+                }
+            }
+
+            // Take the drop out of the world first, as its owner.
+            var dropView = drop.GetComponent<ZNetView>();
+            if (dropView == null || !dropView.IsValid())
+            {
+                Debug.LogWarning($"[VABackpacks] camp from dropped bag: the {backpackPrefab} drop has no live ZDO; nothing deployed.");
+                return false;
+            }
+            ZDOID dropId = dropView.GetZDO().m_uid;
+            if (!dropView.IsOwner())
+            {
+                drop.RequestOwn();
+                Debug.Log($"[VABackpacks] camp from dropped bag: drop {dropId} is still owned by peer {dropView.GetZDO().GetOwner()}; " +
+                          "ownership requested, nothing deployed.");
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "The bag is still syncing. Hold E on it again.");
+                return false;
+            }
+            ItemDrop.ItemData item = drop.m_itemData.Clone();
+            Vector3 dropPos = drop.transform.position;
+            Quaternion dropRot = drop.transform.rotation;
+            ZNetScene.instance.Destroy(drop.gameObject);
+            if (!DestroyedOrQueued(dropId))
+            {
+                // The local object is gone but the ZDO is not: the drop comes back on its own, so nothing was taken.
+                Debug.LogError($"[VABackpacks] camp from dropped bag: drop {dropId} is still in the world after the destroy; nothing deployed.");
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "Camp deploy failed: the bag could not be taken.");
+                return false;
+            }
+
+            var state = new DeployState();
+            try
+            {
+                int moved = BuildCamp(player, item, dropPos, backpackPrefab, cfg, state);
+                Debug.Log($"[VABackpacks] camp from dropped bag: drop {dropId} destroyed, contents {moved} moved");
+                StartCoroutine(CheckDropStaysGone(dropId));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[VABackpacks] Camp deploy failed, rolling back: {ex}");
+                RollBackDeploy(player, state);
+                ItemDrop back = ItemDrop.DropItem(item, 0, dropPos, dropRot);
+                Debug.Log($"[VABackpacks] camp from dropped bag: deploy rolled back, {backpackPrefab} back on the ground as {GetZdoId(back != null ? back.gameObject : null)} (drop {dropId} was taken)");
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "Camp deploy failed. Your bag is back on the ground.");
+                return false;
+            }
+        }
+
+        /// <summary>What a deploy created, so a failed one can be undone.</summary>
+        private sealed class DeployState
+        {
+            public readonly System.Collections.Generic.List<GameObject> Spawned = new System.Collections.Generic.List<GameObject>();
+            public string TerrainSnapshot = string.Empty;
+            public string GroundBefore = string.Empty;   // 1.0.36: FAT voxel snapshot of the site
+            public string PreCamp = string.Empty;        // 1.0.74: FAT 0.2.945 absolute pre-camp capture
+            public bool VoxelGround;   // 1.0.38: FAT owns the ground (levels, pads, restore)
+            public float SaveRadius;   // 1.0.40
+            public bool VegetationRegistered;
+            public Vector3 Center;
+            public float Yaw;   // 1.0.35: the camp facing
+            public BackpackCampMarker Marker;
+            public bool ActiveCampSet;
+            public bool PinAdded;
+        }
+
+        private static void RollBackDeploy(Player player, DeployState st)
+        {
+            foreach (var go in st.Spawned)
+            {
+                try { if (go != null) DestroyZNetObject(go); }
+                catch (Exception ex) { Debug.LogWarning($"[VABackpacks] Rollback: could not remove {go?.name}: {ex.Message}"); }
+            }
+            try
+            {
+                // 1.0.74: the exact pre-camp capture first; the old restores only without one
+                if (!CampTerrainCarry.RestorePreCamp(st.PreCamp, "rollback"))
+                {
+                    if (!string.IsNullOrEmpty(st.TerrainSnapshot))
+                    {
+                        var snap = CampTerrain.Deserialize(st.TerrainSnapshot);
+                        if (snap != null) CampTerrain.Restore(snap);
+                    }
+                    CampTerrainCarry.RestoreGround(st.GroundBefore, st.Center, st.Yaw, "rollback");
+                }
+            }
+            catch (Exception ex) { Debug.LogWarning($"[VABackpacks] Rollback: terrain restore failed: {ex.Message}"); }
+            try { if (st.VegetationRegistered) UnregisterVegetationClearArea(st.Center); } catch { }
+            try { if (st.Marker != null) BackpackCampRegistry.Unregister(st.Marker); } catch { }
+            try { if (st.ActiveCampSet) ClearActiveCamp(player); } catch { }
+            try
+            {
+                if (st.PinAdded && Minimap.instance != null)
+                {
+                    var pins = Minimap.instance.m_pins;
+                    for (int i = pins.Count - 1; i >= 0; i--)
+                    {
+                        var pin = pins[i];
+                        if (pin == null || pin.m_name != "Camp") continue;
+                        float dx = pin.m_pos.x - st.Center.x, dz = pin.m_pos.z - st.Center.z;
+                        if (dx * dx + dz * dz <= 4f) Minimap.instance.RemovePin(pin);
+                    }
+                }
+            }
+            catch { }
+            Debug.Log($"[VABackpacks] Rollback: removed {st.Spawned.Count} camp object(s)");
+        }
+
+        // 1.0.28: ZNetScene.Destroy only QUEUES the owner's ZDO (ZDOMan.DestroyZDO adds it to m_destroySendList; the ZDO is
+        // removed and the destroy sent to peers on a later ZDOMan update), so GetZDO is still non-null in the same frame. That
+        // made 1.0.26 refuse every deploy and pack-up (round 13). Gone or queued for destroy by us both mean it will not come back.
+        private static readonly System.Reflection.FieldInfo DestroySendListField = HarmonyLib.AccessTools.Field(typeof(ZDOMan), "m_destroySendList");
+
+        internal static bool DestroyedOrQueued(ZDOID id)
+        {
+            var zm = ZDOMan.instance;
+            if (zm == null || zm.GetZDO(id) == null) return true;
+            return DestroySendListField?.GetValue(zm) is System.Collections.Generic.List<ZDOID> queued && queued.Contains(id);
+        }
+
+        private System.Collections.IEnumerator CheckPickupStaysGone(ZDOID id)
+        {
+            yield return new WaitForSeconds(2f);
+            bool back = ZDOMan.instance?.GetZDO(id) != null && !DestroyedOrQueued(id) || ZNetScene.instance?.FindInstance(id) != null;
+            Debug.Log($"[VABackpacks] tap pickup: drop {id} {(back ? "CAME BACK after 2 s" : "still gone after 2 s")}");
+        }
+
+        // A drop that comes back after the camp took its bag (a ZDO a peer re-sent) is a duplicate: remove it again.
+        private System.Collections.IEnumerator CheckDropStaysGone(ZDOID id)
+        {
+            yield return new WaitForSeconds(2f);
+            var zdo = ZDOMan.instance?.GetZDO(id);
+            var inst = ZNetScene.instance?.FindInstance(id);
+            if ((zdo == null || DestroyedOrQueued(id)) && inst == null)
+            {
+                Debug.Log($"[VABackpacks] camp from dropped bag: drop {id} still gone after 2 s");
+                yield break;
+            }
+            Debug.LogWarning($"[VABackpacks] camp from dropped bag: drop {id} CAME BACK (zdo {zdo != null}, object {inst != null}); removing it again");
+            if (inst != null) DestroyZNetObject(inst.gameObject);
+            else if (zdo != null) { zdo.SetOwner(ZDOMan.GetSessionID()); ZDOMan.instance.DestroyZDO(zdo); }
+        }
+
+        private int BuildCamp(Player player, ItemDrop.ItemData item, Vector3 dropPos, string backpackPrefab, BackpackConfig cfg, DeployState st)
+        {
             // Compute the camp anchor:
             //   - The CAMPFIRE is offset away from the player along the
             //     player's facing direction, so we don't spawn it under
@@ -330,7 +616,6 @@ namespace VerdantsAscent.Managers.Camp
             float minSep = fcfg.configCampMinSeparation.Value;
             float fireOffset = fcfg.configCampFireOffsetForward.Value;
 
-            Vector3 dropPos = drop.transform.position;
             Vector3 forward = player.transform.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
@@ -370,9 +655,8 @@ namespace VerdantsAscent.Managers.Camp
             {
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center,
                     "Camp deploy failed: prefabs missing (check config).");
-                Debug.LogError($"[VABackpacks] Missing camp prefabs " +
-                               $"fire={firePrefab != null} wb={wbPrefab != null} chest={chestPrefab != null}");
-                return;
+                // Checked before the drop was taken; a throw here rolls the deploy back and gives the bag back.
+                throw new InvalidOperationException($"Missing camp prefabs fire={firePrefab != null} wb={wbPrefab != null} chest={chestPrefab != null}");
             }
 
             // Reuse the blueprint we already loaded above when computing
@@ -419,11 +703,13 @@ namespace VerdantsAscent.Managers.Camp
             }
             else
             {
-                firePos     = anchor;       // procedural: fire at center
+                // 1.0.41 (Fire: the CHEST is the camp centre): the fire sits beside the chest.
+                firePos     = PickOffsetPosition(anchor, radius * 0.5f, minSep, occupied.ToArray()); occupied.Add(firePos);
                 // woodpile placeholder — picked below at radius*0.7.
                 woodpilePos = anchor;
             }
-            Vector3 chestPos     = PickOffsetPosition(anchor, chestRadius, minSep, occupied.ToArray()); occupied.Add(chestPos);
+            // 1.0.41 (Fire): the chest IS the camp centre; every saved offset is measured from it.
+            Vector3 chestPos     = anchor;
             Vector3 workbenchPos = PickOffsetPosition(anchor, chestRadius, minSep, occupied.ToArray()); occupied.Add(workbenchPos);
             Vector3 bedPos       = PickOffsetPosition(anchor, radius, minSep, occupied.ToArray()); occupied.Add(bedPos);
             if (!useBlueprint)
@@ -494,14 +780,43 @@ namespace VerdantsAscent.Managers.Camp
             // default 5m PieceSpawnRadius and 2m minSep this ends at
             // 11m of dirt.
             float terrainRadius = chestRadius + minSep + 4f;
+            // 1.0.40 (Fire: edits outside the saved ring were lost; pieces went to 40 m, terrain only 11 m): ONE save radius, the
+            // camp level's, for pieces, plants, terrain capture, the pre-camp snapshot and the restore. The camp workbench shows it.
+            // Capped at FAT 0.2.863's 48 m capture limit (Fire: "cap it at what FAT supports").
+            // 1.0.55 ([worldgen], FAT 0.2.914: the camp level gets a smooth skirt past its radius): the capture covers FAT's
+            // LevelReach (radius + skirt, read BEFORE the level) + a per-piece pad's 1.5 m + its own 1.5 m skirt, so pack-up puts the
+            // skirt back too. Older FAT (no LevelReach): terrainRadius as before.
+            float levelReach = CampTerrainCarry.LevelReach(campCenter, terrainRadius, campCenter.y);
+            float captureRadius = levelReach > 0f ? levelReach + 1.5f + 1.5f : terrainRadius;
+            float saveRadius = Mathf.Min(48f, Mathf.Max(captureRadius, CampLevels.Radius(CampLevels.Level(item))));
+            Debug.Log($"[VABackpacks] camp save radius {saveRadius:0.0} m (level {terrainRadius:0.0} m, FAT reach {(levelReach > 0f ? levelReach.ToString("0.0") + " m" : "n/a (FAT < 0.2.914)")}, ring {CampLevels.Radius(CampLevels.Level(item)):0.0} m)");
+            st.SaveRadius = saveRadius;
             string terrainSnapshotB64 = string.Empty;
             GameObject terrainGo = null;     // legacy fallback only
             if (spawnTerrain)
             {
                 try
                 {
+                    // 1.0.36: on voxel ground the heightmap snapshot below cannot put the site back, so FAT takes one too.
+                    // 1.0.74 (Fire 10-15, step 0 of the camp: the pre-camp ground for the pack-up, whatever it was: vanilla or edited):
+                    // FAT 0.2.945's absolute capture BEFORE anything is written; the older relative capture stays for an older FAT
+                    st.PreCamp = CampTerrainCarry.CapturePreCamp(campCenter, saveRadius) ?? string.Empty;
+                    st.GroundBefore = CampTerrainCarry.Capture(campCenter, CampLayout.YawOf(forward), saveRadius) ?? string.Empty;
+                    // 1.0.38 ([worldgen]: on a voxel world the voxel field IS the drawn ground; TerrainComp height does not show, and
+                    // the old heightmap level left a raised ring behind after pack-up). A site FAT could capture is voxel ground:
+                    // FAT levels and paints it, and the pack-up puts snapshot0 back. Heightmap worlds keep the old path.
+                    st.VoxelGround = !string.IsNullOrEmpty(st.GroundBefore) && CampTerrainCarry.CanLevel;
+                    if (st.VoxelGround)
+                    {
+                        float before = GroundAtForLog(campCenter);
+                        CampTerrainCarry.Level(campCenter, terrainRadius, campCenter.y, 1, "camp level");
+                        Debug.Log($"[VABackpacks] camp terrain write: camp level (set to y) at ({campCenter.x:0.0},{campCenter.z:0.0}) r {terrainRadius:0.0} m, target y {campCenter.y:0.00}, ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00} (FAT; before the pieces are placed)");
+                    }
+                    else
+                    {
                     var snap = CampTerrain.Snapshot(campCenter, terrainRadius);
                     terrainSnapshotB64 = CampTerrain.Serialize(snap);
+                    st.TerrainSnapshot = terrainSnapshotB64;
 
                     // Level the entire camp footprint to the camp center's
                     // altitude. Smooth = 0.5 → linear falloff over the
@@ -522,6 +837,7 @@ namespace VerdantsAscent.Managers.Camp
                     // mesh gap where the patched compiler's seam vertex
                     // doesn't match the un-Poke'd neighbor's mesh.
                     CampTerrain.RefreshNeighborHeightmaps(campCenter, terrainRadius);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -529,13 +845,25 @@ namespace VerdantsAscent.Managers.Camp
                     if (terrainPrefab != null)
                     {
                         terrainGo = UnityEngine.Object.Instantiate(terrainPrefab, campCenter, Quaternion.identity);
+                        st.Spawned.Add(terrainGo);
                         ApplyCampRadiusToTerrainModifier(terrainGo, terrainRadius);
                     }
                 }
 
                 // Vegetation suppression travels with the terrain patch —
                 // no point suppressing veg if we didn't flatten the area.
-                RegisterVegetationClearArea(campCenter, terrainRadius);
+                RegisterVegetationClearArea(campCenter, Mathf.Max(terrainRadius, CampLevels.Radius(CampLevels.Level(item))));   // 1.0.29: the clearing follows the camp level
+                st.VegetationRegistered = true;
+            }
+            st.Center = campCenter;
+            // 1.0.36: the ground the player shaped at the last camp, stamped around this one at this facing.
+            // 1.0.73 (Fire 10-15: one level, the camp's own edits, THEN the pieces on the ground that leaves): applied here, after the
+            // single level and before any piece is placed; the placement probe reads the voxel field this leaves (FAT writes the
+            // density at once; its rebuild / heal only remeshes). No terrain write after the pieces on voxel ground.
+            {
+                float before = GroundAtForLog(campCenter);
+                CampTerrainCarry.Apply(item, campCenter, CampLayout.YawOf(forward));
+                Debug.Log($"[VABackpacks] camp terrain write: the camp's saved edits (step 2 of 3) at ({campCenter.x:0.0},{campCenter.z:0.0}), ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00}; the pieces are placed next, on this ground");
             }
 
             // Now snap each piece's y to ground. After the level pass
@@ -551,16 +879,93 @@ namespace VerdantsAscent.Managers.Camp
             chairPos     = SnapToGround(chairPos);
             firePos      = SnapToGround(firePos);
 
+            // 1.0.35: a saved layout puts every camp piece back where it stood, turned to this deploy's facing.
+            float campYaw = CampLayout.YawOf(forward);
+            st.Yaw = campYaw;
+            var layout = CampLayout.Read(item);
+            Quaternion fireRot = Quaternion.identity;
+            Quaternion wbRot = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
+            Quaternion chestRot = Quaternion.identity;   // 1.0.41 (Fire): the chest always faces north
+            Quaternion woodRot = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
+            Quaternion? bedRotSaved = null, chairRotSaved = null, cookRotSaved = null;
+            Vector3? cookPosSaved = null;
+            int fromLayout = 0;
+            bool Saved(string role, out Vector3 pos, out Quaternion rot)
+            {
+                pos = default; rot = Quaternion.identity;
+                if (!layout.TryGetValue(role, out var spot)) return false;
+                pos = CampLayout.WorldPos(campCenter, campYaw, spot);
+                rot = CampLayout.WorldRot(campYaw, spot);
+                fromLayout++;
+                return true;
+            }
+            { if (Saved("fire", out var p, out var r)) { firePos = p; fireRot = r; } }
+            { if (Saved("workbench", out var p, out var r)) { workbenchPos = p; wbRot = r; } }
+            // 1.0.41: the chest is the centre and faces north; a saved chest spot (older bags) is not used.
+            { if (Saved("woodpile", out var p, out var r)) { woodpilePos = p; woodRot = r; } }
+            { if (Saved("bed", out var p, out var r)) { bedPos = p; bedRotSaved = r; } }
+            { if (Saved("chair", out var p, out var r)) { chairPos = p; chairRotSaved = r; } }
+            { if (Saved("cook", out var p, out var r)) { cookPosSaved = p; cookRotSaved = r; } }
+            // Fire 10-08 ("stay removed"): with a saved layout, a camp piece the player removed with the hammer is not in it
+            // and does not come back. The chest always does (it is the camp; it cannot be hammer-removed).
+            if (layout.Count > 0)
+            {
+                var gone = new System.Collections.Generic.List<string>();
+                if (spawnFire && !layout.ContainsKey("fire")) { spawnFire = false; gone.Add("fire"); }
+                if (spawnWorkbench && !layout.ContainsKey("workbench")) { spawnWorkbench = false; gone.Add("workbench"); }
+                if (bedPrefab != null && !layout.ContainsKey("bed")) { bedPrefab = null; gone.Add("bed"); }
+                if (woodPrefab != null && !layout.ContainsKey("woodpile")) { woodPrefab = null; gone.Add("woodpile"); }
+                if (chairPrefab != null && !layout.ContainsKey("chair")) { chairPrefab = null; gone.Add("chair"); }
+                if (cookPrefab != null && !layout.ContainsKey("cook")) { cookPrefab = null; gone.Add("cook"); }
+                if (gone.Count > 0) Debug.Log($"[VABackpacks] camp layout: removed by the player, not placed: {string.Join(", ", gone)}");
+            }
+            Debug.Log(layout.Count == 0
+                ? $"[VABackpacks] camp layout: none saved in the bag; camp pieces placed around the fire (facing {campYaw:0})"
+                : $"[VABackpacks] camp layout: {fromLayout} camp piece(s) from the bag's saved layout, turned to facing {campYaw:0}");
+
+            // 1.0.70 (Fire 10-15, "deploying on already edited terrain"): every piece on the real ground (voxel edits included),
+            // clear of the others, off uneven ground; a piece with no good spot is left out (CampGround). Key off = as before.
+            if (CampGround.On)
+            {
+                var placed = new System.Collections.Generic.List<CampGround.Placed>();
+                var leftOut = new System.Collections.Generic.List<string>();
+                string line;
+                CampGround.Place("chest", chestPrefab, ref chestPos, campCenter, placed, true, out line); Debug.Log(line);
+                if (spawnFire && !CampGround.Place("fire", firePrefab, ref firePos, campCenter, placed, false, out line)) { spawnFire = false; leftOut.Add("fire"); }
+                Debug.Log(line);
+                if (spawnWorkbench && !CampGround.Place("workbench", wbPrefab, ref workbenchPos, campCenter, placed, false, out line)) { spawnWorkbench = false; leftOut.Add("workbench"); }
+                if (spawnWorkbench || leftOut.Contains("workbench")) Debug.Log(line);
+                if (bedPrefab != null) { if (!CampGround.Place("bed", bedPrefab, ref bedPos, campCenter, placed, false, out line)) { bedPrefab = null; leftOut.Add("bed"); } Debug.Log(line); }
+                if (woodPrefab != null) { if (!CampGround.Place("woodpile", woodPrefab, ref woodpilePos, campCenter, placed, false, out line)) { woodPrefab = null; leftOut.Add("woodpile"); } Debug.Log(line); }
+                if (chairPrefab != null) { if (!CampGround.Place("chair", chairPrefab, ref chairPos, campCenter, placed, false, out line)) { chairPrefab = null; leftOut.Add("chair"); } Debug.Log(line); }
+                // the grill sits on the fire wherever the fire went (a saved grill spot is relative to the old fire)
+                if (cookPrefab != null) { if (!spawnFire) { cookPrefab = null; leftOut.Add("cooking station (no fire)"); } else cookPosSaved = firePos + Vector3.up * 0.05f; }
+                if (leftOut.Count > 0)
+                    MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, $"Camp: no clear, level spot for {string.Join(", ", leftOut.ToArray())} - left out");
+            }
+
             // Spawn the chest (always). Fire and workbench respect their
             // blueprint toggles — without a blueprint both spawn; with a
             // blueprint each only spawns when its toggle is true.
             GameObject fireGo = spawnFire
-                ? UnityEngine.Object.Instantiate(firePrefab, firePos, Quaternion.identity)
+                ? UnityEngine.Object.Instantiate(firePrefab, firePos, fireRot)
                 : null;
             GameObject wbGo = spawnWorkbench
-                ? UnityEngine.Object.Instantiate(wbPrefab, workbenchPos, Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0))
+                ? UnityEngine.Object.Instantiate(wbPrefab, workbenchPos, wbRot)
                 : null;
-            var chestGo = UnityEngine.Object.Instantiate(chestPrefab, chestPos, Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0));
+            var chestGo = UnityEngine.Object.Instantiate(chestPrefab, chestPos, chestRot);
+            st.Spawned.Add(fireGo);
+            st.Spawned.Add(wbGo);
+            // 1.0.35 (Fire: could not build at the camp without nobuild): the workbench must be a working vanilla station.
+            if (wbGo != null)
+            {
+                var station = wbGo.GetComponent<CraftingStation>();
+                Debug.Log(station == null
+                    ? $"[VABackpacks] camp workbench: {wbPrefab.name} has NO CraftingStation; it gives no build range"
+                    : $"[VABackpacks] camp workbench: {station.m_name}, build range {station.m_rangeBuild:0.#} m, ZDO valid {wbGo.GetComponent<ZNetView>()?.IsValid() == true}");
+                if (station != null) StartCoroutine(CheckStationLater(station));
+            }
+            st.Spawned.Add(chestGo);
 
             // Spawn optional decoration / utility pieces. Each get-or-skip
             // is tolerant of missing prefabs so a server can disable any
@@ -571,13 +976,21 @@ namespace VerdantsAscent.Managers.Camp
             GameObject bedGo = null;
             if (bedPrefab != null)
             {
-                Quaternion bedRot = Quaternion.LookRotation(bedPos - firePos);
+                Quaternion bedRot = bedRotSaved ?? Quaternion.LookRotation(bedPos - firePos);
                 bedGo = UnityEngine.Object.Instantiate(bedPrefab, bedPos, bedRot);
+                st.Spawned.Add(bedGo);
+            }
+            // 1.0.31 (round 14 camp: 'missing within 6 m: rawood_bed_bal|bed'): where the bed went, from the fire and the chest.
+            Debug.Log(bedPrefab == null
+                ? $"[VABackpacks] camp bed: none ('{fcfg.configCampBedPrefab.Value}' resolved to no prefab, or beds are off for blueprints)"
+                : $"[VABackpacks] camp bed: {bedPrefab.name} at {Vector3.Distance(bedPos, firePos):0.0} m from the fire, {Vector3.Distance(bedPos, chestPos):0.0} m from the chest");
+            {
             }
 
             GameObject woodGo = woodPrefab != null
-                ? UnityEngine.Object.Instantiate(woodPrefab, woodpilePos, Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0))
+                ? UnityEngine.Object.Instantiate(woodPrefab, woodpilePos, woodRot)
                 : null;
+            st.Spawned.Add(woodGo);
 
             // Tag the wood pile's ZDO with our marker so:
             //   1. The BackpackCampWoodPile component (added directly
@@ -606,8 +1019,9 @@ namespace VerdantsAscent.Managers.Camp
             GameObject chairGo = null;
             if (chairPrefab != null)
             {
-                Quaternion chairRot = Quaternion.LookRotation(chairPos - firePos);
+                Quaternion chairRot = chairRotSaved ?? Quaternion.LookRotation(chairPos - firePos);
                 chairGo = UnityEngine.Object.Instantiate(chairPrefab, chairPos, chairRot);
+                st.Spawned.Add(chairGo);
             }
 
             // Cooking station goes ON the fire (small Y offset) so it
@@ -616,8 +1030,11 @@ namespace VerdantsAscent.Managers.Camp
             // above the campfire — sitting just barely above ground
             // (0.05m) reads as "resting on the stones".
             GameObject cookGo = cookPrefab != null
-                ? UnityEngine.Object.Instantiate(cookPrefab, firePos + Vector3.up * 0.05f, Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0))
+                ? UnityEngine.Object.Instantiate(cookPrefab, cookPosSaved ?? firePos + Vector3.up * 0.05f, cookRotSaved ?? Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0))
                 : null;
+            st.Spawned.Add(cookGo);
+            // 1.0.73: the proof that nothing moved the ground after the pieces (R-C1: a later rebuild buried them): 3 s on, once
+            StartCoroutine(VerifyGroundLater(new[] { ("chest", chestGo), ("fire", fireGo), ("workbench", wbGo), ("bed", bedGo), ("woodpile", woodGo), ("chair", chairGo) }));
 
             // ── Per-piece terrain pad (defensive layer) ──
             // The global level above flattens the whole camp footprint to
@@ -642,14 +1059,26 @@ namespace VerdantsAscent.Managers.Camp
             {
                 const float PIECE_PAD_RADIUS = 1.5f;
                 const float PIECE_PAD_SMOOTH = 0.3f;
+                // 1.0.38: on voxel ground the pads go through FAT too (TerrainComp height does not show there).
+                void Pad(Vector3 at)
+                {
+                    float before = GroundAtForLog(at);
+                    if (st.VoxelGround) CampTerrainCarry.Level(at, PIECE_PAD_RADIUS, at.y, 1, null);
+                    else CampTerrain.Level(at, PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, at.y);
+                    Debug.Log($"[VABackpacks] camp terrain write: piece pad (set to y) at ({at.x:0.0},{at.z:0.0}) r {PIECE_PAD_RADIUS:0.0} m, target y {at.y:0.00}, ground at its centre {before:0.00} -> {GroundAtForLog(at):0.00} ({(st.VoxelGround ? "FAT" : "heightmap")})");
+                }
+                // 1.0.73: on voxel ground the pieces were placed ON the final ground (the probe), so no pad writes after them (a later
+                // write is what buried them in R-C1). Heightmap worlds keep the pads (their snap is the generated ground).
+                if (st.VoxelGround) Debug.Log("[VABackpacks] camp terrain write: no per-piece pads (voxel ground: the pieces sit on the read ground; nothing is written after them)");
+                else
                 try
                 {
-                    if (fireGo  != null) CampTerrain.Level(firePos,      PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, firePos.y);
-                    if (wbGo    != null) CampTerrain.Level(workbenchPos, PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, workbenchPos.y);
-                    if (chestGo != null) CampTerrain.Level(chestPos,     PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, chestPos.y);
-                    if (bedGo   != null) CampTerrain.Level(bedPos,       PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, bedPos.y);
-                    if (woodGo  != null) CampTerrain.Level(woodpilePos,  PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, woodpilePos.y);
-                    if (chairGo != null) CampTerrain.Level(chairPos,     PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, chairPos.y);
+                    if (fireGo  != null) Pad(firePos);
+                    if (wbGo    != null) Pad(workbenchPos);
+                    if (chestGo != null) Pad(chestPos);
+                    if (bedGo   != null) Pad(bedPos);
+                    if (woodGo  != null) Pad(woodpilePos);
+                    if (chairGo != null) Pad(chairPos);
                     // Cooking station sits on top of the fire — no pad
                     // needed since the fire's pad already flattened the
                     // ground beneath both.
@@ -657,7 +1086,11 @@ namespace VerdantsAscent.Managers.Camp
                     // Per-piece pads can also straddle a zone seam — refresh
                     // the wider area once at the end (single Poke per tile,
                     // cheaper than one per pad).
-                    CampTerrain.RefreshNeighborHeightmaps(campCenter, terrainRadius);
+                    // 1.0.73 (R-C1, Fire's "camp still deploys like shit" mound): heightmap worlds only. On voxel ground a Poke makes
+                    // FAT rebuild the zones from heightmap data ("terraform: zone rebuilt ... after its heightmap changed") on top of
+                    // the levelled voxel field: the 1-2.6 m mound with every piece under it. FAT heals its own seams there.
+                    if (st.VoxelGround) Debug.Log("[VABackpacks] camp terrain write: no heightmap Poke (voxel ground: FAT owns the seams)");
+                    else CampTerrain.RefreshNeighborHeightmaps(campCenter, terrainRadius);
                 }
                 catch (Exception ex)
                 {
@@ -701,7 +1134,7 @@ namespace VerdantsAscent.Managers.Camp
                 // spamming the log with hundreds of identical messages.
                 EnableDataBlobFailureDump();
 
-                Quaternion campYaw = Quaternion.LookRotation(forward);
+                Quaternion blueprintFacing = Quaternion.LookRotation(forward);
                 int spawned = 0, missing = 0, dataApplied = 0;
 
                 // Per-backpack vertical offset — sinks the blueprint
@@ -730,11 +1163,12 @@ namespace VerdantsAscent.Managers.Camp
                     // it as the blueprint origin is what was producing
                     // "fire under the blueprint" no matter how far we
                     // pushed the anchor forward.
-                    Vector3 worldPos = campCenter + (campYaw * piece.Pos);
+                    Vector3 worldPos = campCenter + (blueprintFacing * piece.Pos);
                     worldPos.y += blueprintYOffset;     // per-backpack vertical adjust
-                    Quaternion worldRot = campYaw * piece.Rot;
+                    Quaternion worldRot = blueprintFacing * piece.Rot;
 
                     var pieceGo = UnityEngine.Object.Instantiate(prefab, worldPos, worldRot);
+                    st.Spawned.Add(pieceGo);
 
                     // Apply blueprint-saved scale. Vanilla Valheim mostly
                     // ignores transform.localScale on pieces, but the scaler
@@ -787,15 +1221,24 @@ namespace VerdantsAscent.Managers.Camp
             marker.BackpackPrefabName  = backpackPrefab;
             marker.BackpackRows        = cfg.Rows;
             marker.BackpackColumns     = cfg.Columns;
+            StampCampUid(item);   // 1.0.34: the pack-up finds this exact item again (no second bag while it exists)
+            marker.BackpackItemState   = CaptureItemState(item); // 1.0.22: quality, special slots … come back on pack-up
             marker.CampCenter          = campCenter;     // blueprint center (or fire when procedural)
+            marker.CampYaw             = st.Yaw;        // 1.0.35
+            marker.GroundBefore        = st.GroundBefore;   // 1.0.36
+            marker.PreCamp             = st.PreCamp;        // 1.0.74
+            marker.SaveRadius          = st.SaveRadius;     // 1.0.40
             marker.CampRadius          = terrainRadius;     // matches the dirt patch + blueprint footprint
             marker.WriteToZdo();
             BackpackCampRegistry.Register(marker);
+            st.Marker = marker;
 
             // Resize the chest's inventory to match the backpack and load
             // the saved contents from the dropped item's customData.
+            // 1.0.25: the drop is already gone, so contents that fail to load roll the deploy back instead of being lost.
             ResizeContainer(chestGo, cfg.Rows, cfg.Columns);
-            LoadBackpackContentsIntoContainer(chestGo, drop.m_itemData);
+            int moved = LoadBackpackContentsIntoContainer(chestGo, item);
+            if (moved < 0) throw new InvalidOperationException("the bag's contents did not load into the camp chest");
 
             // Restrict the chest to its creator. Vanilla Container has
             //   if (!CheckAccess(playerId)) deny;
@@ -856,6 +1299,7 @@ namespace VerdantsAscent.Managers.Camp
 
             // Mark the player as having an active camp.
             SetActiveCamp(player, chestZ);
+            st.ActiveCampSet = true;
 
             // Pin the camp on the deployer's minimap. save=true persists
             // it across logout (in the player's profile, not on the chest's
@@ -870,18 +1314,35 @@ namespace VerdantsAscent.Managers.Camp
                 // is also campCenter), and so the icon points to the
                 // structure's heart rather than a fire on the perimeter
                 // when a blueprint is in use.
+                CleanCampPins(player, null, "deploy");   // 1.0.35: the camp pins this mod recorded and no other
                 Minimap.instance?.AddPin(campCenter, Minimap.PinType.Bed, "Camp",
                                          save: true, isChecked: false,
                                          ownerID: player.GetPlayerID());
+                st.PinAdded = true;
+                RecordCampPin(player, campCenter);   // 1.0.35: only recorded pins are ever removed
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[VABackpacks] Failed to add camp map pin: {ex.Message}");
             }
 
-            // Despawn the original ItemDrop (we've moved its data into
-            // the chest). Use ZNetScene to destroy properly.
-            DestroyZNetObject(drop.gameObject);
+            // 1.0.29 (camp upgrades step 2): the pieces the bag packed are placed again around the camp. Into st.Spawned
+            // first, so a failure rolls them back and the dropped bag keeps its blueprint.
+            int spawnedBefore = st.Spawned.Count;
+            CampCapture.Place(player, item, campCenter, st.Yaw, st.Spawned, TryApplyPieceData);
+            // 1.0.44: the camp records the pieces its deploy placed, so an over-cap pack-up takes these back first.
+            if (st.Marker != null)
+            {
+                st.Marker.DeployedPieceIds.Clear();
+                for (int k = spawnedBefore; k < st.Spawned.Count; k++)
+                {
+                    var nv = st.Spawned[k] != null ? st.Spawned[k].GetComponent<ZNetView>() : null;
+                    if (nv != null && nv.IsValid()) st.Marker.DeployedPieceIds.Add(nv.GetZDO().m_uid);
+                }
+                st.Marker.WriteToZdo();
+            }
+
+            // (1.0.25: the original ItemDrop was taken out of the world before the build, in DeployFromItemDrop.)
 
             // Show both Center and TopLeft messages so players get clear
             // feedback regardless of where their attention is.
@@ -889,6 +1350,7 @@ namespace VerdantsAscent.Managers.Camp
                 $"Camp deployed: {backpackPrefab}");
             MessageHud.instance?.ShowMessage(MessageHud.MessageType.TopLeft,
                 "Camp deployed");
+            return moved;
         }
 
         /// <summary>
@@ -991,15 +1453,23 @@ namespace VerdantsAscent.Managers.Camp
             var inv = player.GetInventory();
             if (inv == null) yield break;
 
-            // Find the weapon-bag instance in the player's inventory by
-            // prefab-name match.
+            // The weapon-bag that did the slam: the one in the right hand. 1.0.34 (Fire's hand test, a camp from an
+            // RPGClasses bar slot "does not remove the staff"): this took the FIRST inventory item with the prefab name,
+            // so with a second staff anywhere in the inventory that one was consumed and the held bar-slot staff stayed.
+            // Only without a held match does it fall back to the first one in the inventory.
             ItemDrop.ItemData weapon = null;
-            foreach (var it in inv.GetAllItems())
+            var held = player.RightItem;
+            if (held?.m_dropPrefab != null && held.m_dropPrefab.name == prefabName && inv.ContainsItem(held))
+                weapon = held;
+            if (weapon == null)
             {
-                if (it?.m_dropPrefab != null && it.m_dropPrefab.name == prefabName)
+                foreach (var it in inv.GetAllItems())
                 {
-                    weapon = it;
-                    break;
+                    if (it?.m_dropPrefab != null && it.m_dropPrefab.name == prefabName)
+                    {
+                        weapon = it;
+                        break;
+                    }
                 }
             }
             if (weapon == null)
@@ -1007,6 +1477,7 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogWarning($"[VABackpacks] {prefabName} deploy: no instance in inventory.");
                 yield break;
             }
+            int sameBefore = inv.GetAllItems().Count(it => it?.m_dropPrefab != null && it.m_dropPrefab.name == prefabName);
 
             // STEP 1: Unequip first. This is the critical re-order. When
             // the weapon is bp-tagged, VAInventory's BackpackStorageSync
@@ -1062,6 +1533,7 @@ namespace VerdantsAscent.Managers.Camp
             // the weapon's fully-populated final state.
             try
             {
+                StampCampUid(weapon, fresh: true);   // 1.0.34: copied into the drop below, so a left-behind staff matches
                 drop.m_itemData = weapon.Clone();
 
                 // Re-populate the cloned customData with the weapon's
@@ -1085,6 +1557,16 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogWarning($"[VABackpacks] {prefabName} deploy clone failed: {ex.Message}");
             }
 
+            // 1.0.25: the drop's ZDO carries the weapon too, so a drop that stays on the ground (a deploy that did not run)
+            // still holds its contents after a reload or for another peer.
+            try
+            {
+                var spawnedView = drop.GetComponent<ZNetView>();
+                if (spawnedView != null && spawnedView.IsValid() && spawnedView.IsOwner())
+                    ItemDrop.SaveToZDO(drop.m_itemData, spawnedView.GetZDO());
+            }
+            catch (Exception ex) { Debug.LogWarning($"[VABackpacks] {prefabName} deploy: could not write the drop's ZDO: {ex.Message}"); }
+
             // STEP 4: Remove from inventory + verify. If RemoveItem
             // returns false, abort the deploy so we don't end up with a
             // duplicated weapon (one in hand + one as the new camp).
@@ -1096,6 +1578,24 @@ namespace VerdantsAscent.Managers.Camp
             catch (Exception ex)
             {
                 Debug.LogError($"[VABackpacks] {prefabName} RemoveItem threw: {ex.Message}");
+            }
+
+            if (removed)
+            {
+                // Fire's screenshot (bar-slot camp): the bag section went but the staff stayed in the hand. Something can
+                // equip the staff again in the frame between the unequip and the removal (the RPGClasses bar re-arms its
+                // slot weapon), so a removed staff still held is unequipped here, which clears the hand and its visual.
+                if (player.IsItemEquiped(weapon) || player.RightItem == weapon || player.LeftItem == weapon)
+                {
+                    Debug.Log($"[VABackpacks] {prefabName} deploy: the consumed staff was still in the hand; unequipping it (no ghost staff)");
+                    try { player.UnequipItem(weapon, false); }
+                    catch (Exception ex) { Debug.LogWarning($"[VABackpacks] {prefabName} deploy: hand clear failed: {ex.Message}"); }
+                }
+                weapon.m_equipped = false;
+                StartCoroutine(CheckHandClear(player, weapon, prefabName));
+                int sameAfter = inv.GetAllItems().Count(it => it?.m_dropPrefab != null && it.m_dropPrefab.name == prefabName);
+                Debug.Log($"[VABackpacks] {prefabName} deploy: consumed the {(weapon == held ? "held" : "first inventory")} one " +
+                          $"({sameBefore} -> {sameAfter} in the inventory, right hand now {player.RightItem?.m_dropPrefab?.name ?? "empty"})");
             }
 
             if (!removed)
@@ -1124,22 +1624,143 @@ namespace VerdantsAscent.Managers.Camp
             // auto-picks it up, and the weapon magically reappears in
             // their inventory after a "successful" deploy — exactly
             // the symptom the ZSyncTransform NRE was producing.
-            bool deployFailed = false;
+            //
+            // 1.0.25: DeployFromItemDrop now takes the drop out of the world itself BEFORE it builds, and a failed build
+            // is rolled back with the item dropped again. If it stops before taking the drop, the drop is still on the
+            // ground holding the weapon for the player to pick up; destroying it here (as before) lost the weapon, which
+            // already left the inventory above.
+            bool deployed = false;
             try
             {
-                DeployFromItemDrop(drop);
+                deployed = DeployFromItemDrop(drop);
             }
             catch (Exception ex)
             {
-                deployFailed = true;
                 Debug.LogError($"[VABackpacks] {prefabName} deploy failed: {ex}");
             }
+            if (!deployed && drop != null)
+                Debug.Log($"[VABackpacks] {prefabName} deploy did not run; the {prefabName} stays on the ground at {targetPos} to pick up.");
+        }
 
-            if (deployFailed && drop != null && drop.gameObject != null)
+        // 1.0.34: the id that ties a camp to the item it was made from. The slam deploy stamps the held weapon before it is
+        // cloned, so a copy that stayed behind carries the same id; any other deploy stamps the item if it has none.
+        internal const string CampUidKey = "va_camp_uid";
+
+        private static void StampCampUid(ItemDrop.ItemData item, bool fresh = false)
+        {
+            if (item == null) return;
+            if (item.m_customData == null) item.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+            if (fresh || !item.m_customData.ContainsKey(CampUidKey))
+                item.m_customData[CampUidKey] = Guid.NewGuid().ToString("N");
+        }
+
+        private static ItemDrop.ItemData FindCampOriginal(Player player, Inventory inv, string uid)
+        {
+            if (string.IsNullOrEmpty(uid) || player == null) return null;
+            bool Match(ItemDrop.ItemData it) => it?.m_customData != null && it.m_customData.TryGetValue(CampUidKey, out var v) && v == uid;
+            if (inv != null) foreach (var it in inv.GetAllItems()) if (Match(it)) return it;
+            if (Match(player.RightItem)) return player.RightItem;
+            if (Match(player.LeftItem)) return player.LeftItem;
+            return null;
+        }
+
+        // 1.0.35: one second after the deploy the workbench has run its Start; vanilla's own range query must find it.
+        private IEnumerator CheckStationLater(CraftingStation station)
+        {
+            yield return new WaitForSeconds(1f);
+            if (station == null) { Debug.Log("[VABackpacks] camp workbench: gone 1 s after the deploy"); yield break; }
+            Vector3 probe = station.transform.position + station.transform.right * 3f;
+            bool inRange = CraftingStation.HaveBuildStationInRange(station.m_name, probe);
+            Debug.Log($"[VABackpacks] camp workbench after 1 s: vanilla build-station query 3 m away finds it: {inRange} (range {station.m_rangeBuild:0.#} m)");
+        }
+
+        // 1.0.37: a building in the way of a camp is a piece a player built and that stands in the world: a live ZDO, a
+        // creator, a WearNTear, not a plant, not a camp piece, and not an effect or terrain object that carries a Piece
+        // (sfx_/vfx_ objects, VAVoxel chunks, pets).
+        private static bool IsRealBuilding(Piece pc)
+        {
+            if (pc == null || !pc.gameObject.activeInHierarchy) return false;
+            var nview = pc.GetComponent<ZNetView>();
+            if (nview == null || !nview.IsValid()) return false;
+            if (pc.GetCreator() == 0) return false;
+            if (pc.GetComponent<WearNTear>() == null) return false;
+            if (pc.GetComponent<Plant>() != null || pc.GetComponent<Character>() != null) return false;
+            if (nview.GetZDO().GetInt(CampImmortalPatch.KEY_IMMORTAL, 0) == 1) return false;
+            string name = Utils.GetPrefabName(pc.gameObject);
+            if (name.StartsWith("sfx_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("vfx_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("fx_", StringComparison.OrdinalIgnoreCase) || name.IndexOf("Voxel", StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
+            return true;
+        }
+
+        // 1.0.41 (Fire fell through the world when he packed his camp: the ground under him changed during the terrain restore).
+        // Every player and tame this client owns inside the ring before the restore is checked for 3 s afterwards; one found
+        // below the ground (the new surface) is set on it, 0.5 m up, with its fall stopped.
+        private static List<Character> CharactersInRing(Vector3 centre, float radius)
+        {
+            var list = new List<Character>();
+            float r = radius + 2f;
+            foreach (Character c in Character.GetAllCharacters())
             {
-                try { DestroyZNetObject(drop.gameObject); }
-                catch { /* defensive — already torn down somehow */ }
+                if (c == null || c.IsDead() || !(c.IsPlayer() || c.IsTamed())) continue;
+                var nview = c.GetComponent<ZNetView>();
+                if (nview == null || !nview.IsValid() || !nview.IsOwner()) continue;
+                Vector3 p = c.transform.position;
+                float dx = p.x - centre.x, dz = p.z - centre.z;
+                if (dx * dx + dz * dz <= r * r) list.Add(c);
             }
+            return list;
+        }
+
+        private IEnumerator LiftAboveGround(List<Character> chars)
+        {
+            if (chars == null || chars.Count == 0 || ZoneSystem.instance == null) yield break;
+            var lifted = new HashSet<Character>();
+            float until = Time.time + 3f;
+            while (Time.time < until)
+            {
+                foreach (Character c in chars)
+                {
+                    if (c == null || lifted.Contains(c)) continue;
+                    Vector3 p = c.transform.position;
+                    float ground = ZoneSystem.instance.GetGroundHeight(p);
+                    if (p.y >= ground - 0.3f) continue;
+                    Vector3 to = new Vector3(p.x, ground + 0.5f, p.z);
+                    c.transform.position = to;
+                    var body = c.GetComponent<Rigidbody>();
+                    if (body != null) { body.position = to; body.velocity = Vector3.zero; }
+                    lifted.Add(c);
+                    Debug.Log($"[VABackpacks] pack-up: lifted {c.GetHoverName()} from y {p.y:0.00} to {to.y:0.00} (below the restored ground)");
+                }
+                yield return null;
+            }
+        }
+
+        /// <summary>1.0.44: the camp level of a placed camp (its bag's saved quality), as pack-up reads it.</summary>
+        internal static int LevelOf(BackpackCampMarker marker)
+        {
+            if (marker == null || ZNetScene.instance == null) return 1;
+            var prefab = ZNetScene.instance.GetPrefab(marker.BackpackPrefabName);
+            var drop = prefab != null ? prefab.GetComponent<ItemDrop>() : null;
+            if (drop == null) return 1;
+            var probe = drop.m_itemData.Clone();
+            probe.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+            RestoreItemState(probe, marker.BackpackItemState);
+            return CampLevels.Level(probe);
+        }
+
+        // A second look 1 s after a slam deploy: the consumed staff must not be back in a hand (re-armed by a bar poll).
+        private IEnumerator CheckHandClear(Player player, ItemDrop.ItemData weapon, string prefabName)
+        {
+            yield return new WaitForSeconds(1f);
+            if (player == null || weapon == null) yield break;
+            bool held = player.RightItem == weapon || player.LeftItem == weapon;
+            if (held)
+            {
+                try { player.UnequipItem(weapon, false); } catch { }
+                weapon.m_equipped = false;
+            }
+            Debug.Log($"[VABackpacks] {prefabName} deploy: hand check after 1 s: {(held ? "the consumed staff was held again; unequipped" : "clear")}, right hand {player.RightItem?.m_dropPrefab?.name ?? "empty"}");
         }
 
         /// <summary>
@@ -1199,11 +1820,39 @@ namespace VerdantsAscent.Managers.Camp
         /// / Collider / ZNetView from the clone so it can't be picked up
         /// or interfere with physics — purely visual.
         /// </summary>
-        private static void AttachBackpackVisualToChest(GameObject chestGo, string backpackPrefabName)
+        internal const string ChestVisualName = "VA_BackpackVisual";
+        private const float BagLeanDegrees = 12f;
+
+        internal static void AttachBackpackVisualToChest(GameObject chestGo, string backpackPrefabName)
         {
             if (chestGo == null || string.IsNullOrEmpty(backpackPrefabName)) return;
+            // 1.0.77 ([fgn]'s dedi audit, after 1.0.76's strip): purely visual, and on a headless server the bag's meshes are already
+            // dropped (DedicatedStrip), so the standing copy would be an empty object per camp chest. Nothing to draw: skip it.
+            if (VerdantsAscent.Utilities.DedicatedStrip.Headless) return;
+            if (chestGo.transform.Find(ChestVisualName) != null) return;   // 1.0.25: the deploy and the chest's load both call this
             var prefab = ZNetScene.instance?.GetPrefab(backpackPrefabName);
             if (prefab == null) return;
+
+            // 1.0.25 (Fire 10-08: "the backpack placed next to the chest was floating in the air, its base needs to rest on the
+            // ground like it's leaning against the chest"). The old copy switched on EVERY renderer of the bag prefab, worn
+            // model included, and that model is posed ~1.4 m up on a player's back. A shoulder bag now uses that worn mesh
+            // alone, upright, with its base on the ground beside the chest and its top leaning on the chest's side.
+            try
+            {
+                var standing = BackpackWornVisual.BuildStandingCopy(prefab, ChestVisualName);
+                if (standing != null)
+                {
+                    LeanAgainstChest(chestGo, standing, prefab.name);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[VABackpacks] Camp bag visual for {backpackPrefabName} failed: {ex.Message}");
+                var half = chestGo.transform.Find(ChestVisualName);
+                if (half != null) UnityEngine.Object.Destroy(half.gameObject);
+                return;
+            }
 
             // CRITICAL: temporarily deactivate the source prefab before
             // Instantiate. If we don't, Unity calls Awake() on the clone
@@ -1224,7 +1873,7 @@ namespace VerdantsAscent.Managers.Camp
                 if (prefabWasActive) prefab.SetActive(false);
 
                 var visual = UnityEngine.Object.Instantiate(prefab, chestGo.transform);
-                visual.name = "VA_BackpackVisual";
+                visual.name = ChestVisualName;
 
                 // Position: place the bag NEXT to the chest, not under it.
                 // The chest's local mesh occupies roughly ±0.5m on X,
@@ -1244,6 +1893,12 @@ namespace VerdantsAscent.Managers.Camp
                 // before SetActive(true) triggers Awake on the clone.
                 StripGameLogic(visual, immediate: true);
 
+                // 1.0.25: a worn model ("attach_<bone>", posed on a player) never goes on the chest copy; switched on below it
+                // would float in the air.
+                foreach (var t in visual.GetComponentsInChildren<Transform>(true))
+                    if (t != null && t != visual.transform && t.name.StartsWith("attach_", StringComparison.Ordinal))
+                        UnityEngine.Object.DestroyImmediate(t.gameObject);
+
                 // Force-enable every renderer + mesh holder. Armor-style
                 // bag prefabs (capes, shoulder bags) often start with
                 // their model GameObject disabled and rely on
@@ -1251,11 +1906,29 @@ namespace VerdantsAscent.Managers.Camp
                 // the visual clone would be invisible for any non-
                 // weapon bag — only HoboStick (a TwoHandedWeapon with
                 // an always-on root mesh) would render.
-                EnableAllVisuals(visual);
+                // 1.0.55 (Fire 10-14: the Wizard Staff leaned on the chest as the ORIGINAL cloned root staff): a weapon-bag ("attach"
+                // child, the model VisEquipment puts in the hand) keeps the prefab's OWN renderer states. StaffFiresWizard's
+                // attach/default still carries the donor StaffRoot mesh with its renderer switched OFF (and 'glow' off); our model is
+                // attach/default/1model. EnableAllVisuals switched the donor back on. Bags (no "attach") keep the old path.
+                var hand = visual.transform.Find("attach");
+                if (hand != null && hand.GetComponentsInChildren<Renderer>(false).Any(r => r.enabled))
+                {
+                    var shown = hand.GetComponentsInChildren<Renderer>(false).Where(r => r.enabled).Select(r => r.name).ToArray();
+                    Debug.Log($"[VABackpacks] camp bag visual: {prefab.name} uses its hand model as authored: {shown.Length} renderer(s) on ({string.Join(", ", shown)}); disabled ones (donor mesh) stay off");
+                }
+                else EnableAllVisuals(visual);
 
                 // Now safe to activate — every behaviour that would have
                 // run Awake has been removed.
                 visual.SetActive(true);
+
+                // 1.0.25: its lowest point on the ground (the old fixed offset ignored where the model's pivot is).
+                if (TryWorldRendererBounds(visual.transform, out Bounds wb))
+                {
+                    float ground = GroundHeightAt(visual.transform.position, chestGo, chestGo.transform.position.y, out string from);
+                    visual.transform.position += Vector3.up * (ground - wb.min.y);
+                    Debug.Log($"[VABackpacks] camp bag visual: {prefab.name} beside the chest, base on {from} at y={ground:F2} (moved {ground - wb.min.y:+0.00;-0.00} m)");
+                }
             }
             catch (Exception ex)
             {
@@ -1268,6 +1941,153 @@ namespace VerdantsAscent.Managers.Camp
                 // would break everyone else's ability to spawn it.
                 if (prefabWasActive && !prefab.activeSelf) prefab.SetActive(true);
             }
+        }
+
+        // 1.0.25: the standing worn mesh (back panel toward +Z) put beside the chest's right side: its bottom back edge on the
+        // ground, turned so the back panel faces the chest, and tilted BagLeanDegrees about that edge so its top rests on the
+        // chest's side. The gap at the base is exactly what the lean needs, so the top touches without going in.
+        // Each shoulder bag's measured pose (Tools\_stage_seasons_vabp125\camp_pose.txt; the rip's
+        // FiresVABackpacksBundle.MeasureCampPose on the 1.0.25 meshes, which the game can't read back): the tilt that stands the
+        // worn mesh upright (the Explorer Bag's frame, the others' thinnest front-to-back), and at that tilt + BagLeanDegrees
+        // the lowest point (MinY), the point nearest the chest (MaxZ) and the middle along X, in the worn mesh's frame.
+        private readonly struct CampPose
+        {
+            public readonly float Tilt, MinY, MaxZ, CentreX;
+            public CampPose(float tilt, float minY, float maxZ, float centreX) { Tilt = tilt; MinY = minY; MaxZ = maxZ; CentreX = centreX; }
+        }
+        private static readonly System.Collections.Generic.Dictionary<string, CampPose> CampPoses = new System.Collections.Generic.Dictionary<string, CampPose>
+        {
+            { "SmallBag_va",    new CampPose(2.50f, 1.2079f, 0.3338f, 0.0423f) },
+            { "DayBag_va",      new CampPose(6.00f, 1.1762f, 0.4596f, 0.0184f) },
+            { "ExplorerBag_va", new CampPose(-9.70f, 1.0511f, 0.1443f, 0.0291f) },
+        };
+
+        private static void LeanAgainstChest(GameObject chestGo, GameObject bag, string prefabName)
+        {
+            if (CampPoses.TryGetValue(prefabName, out CampPose cp))
+            {
+                Transform ct = chestGo.transform;
+                Vector3 s = ct.right; s.y = 0f;
+                s = s.sqrMagnitude > 1e-4f ? s.normalized : Vector3.right;
+                Quaternion look = Quaternion.LookRotation(-s, Vector3.up);
+                Vector3 target = ct.position + s * (ChestHalfWidth(chestGo, s) + 0.02f);
+                target.y = GroundHeightAt(target + s * 0.2f, chestGo, ct.position.y, out string groundFrom);
+                bag.transform.SetParent(ct, false);
+                bag.transform.rotation = look * Quaternion.Euler(cp.Tilt + BagLeanDegrees, 0f, 0f);
+                bag.transform.position = target - look * new Vector3(cp.CentreX, cp.MinY, cp.MaxZ);
+                Vector3 chestScale = ct.lossyScale;
+                bag.transform.localScale = new Vector3(1f / Mathf.Max(chestScale.x, 1e-3f), 1f / Mathf.Max(chestScale.y, 1e-3f), 1f / Mathf.Max(chestScale.z, 1e-3f));
+                Debug.Log($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {groundFrom} at y={target.y:F2}, " +
+                          $"{BagLeanDegrees:F0} deg lean (upright {cp.Tilt:F1} deg), top 0.02 m from the chest's side");
+                return;
+            }
+
+            Bounds b = LocalMeshBounds(bag.transform);
+            var pose = new GameObject("pose").transform;
+            pose.SetParent(bag.transform, false);
+            var parts = new System.Collections.Generic.List<Transform>();
+            foreach (Transform c in bag.transform) if (c != pose) parts.Add(c);
+            foreach (var c in parts) c.SetParent(pose, false);
+            pose.localPosition = -new Vector3(b.center.x, b.min.y, b.max.z);
+
+            Transform chest = chestGo.transform;
+            Vector3 side = chest.right; side.y = 0f;
+            side = side.sqrMagnitude > 1e-4f ? side.normalized : Vector3.right;
+            float height = b.size.y;
+            float gap = height * Mathf.Sin(BagLeanDegrees * Mathf.Deg2Rad) + 0.02f;
+            Vector3 spot = chest.position + side * (ChestHalfWidth(chestGo, side) + gap);
+            spot.y = GroundHeightAt(spot, chestGo, chest.position.y, out string from);
+
+            bag.transform.SetParent(chest, false);
+            bag.transform.position = spot;
+            bag.transform.rotation = Quaternion.LookRotation(-side, Vector3.up) * Quaternion.Euler(BagLeanDegrees, 0f, 0f);
+            Vector3 cs = chest.lossyScale;
+            bag.transform.localScale = new Vector3(1f / Mathf.Max(cs.x, 1e-3f), 1f / Mathf.Max(cs.y, 1e-3f), 1f / Mathf.Max(cs.z, 1e-3f));
+
+            float lowest = TryWorldRendererBounds(bag.transform, out Bounds wb) ? wb.min.y : spot.y;
+            Debug.Log($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {from} at y={spot.y:F2} " +
+                      $"(lowest point {lowest:F2}), {height:F2} m tall, {BagLeanDegrees:F0} deg lean, {gap:F2} m from the chest's side");
+        }
+
+        // How far the chest reaches along 'side' from its position (its solid colliders; 0.5 m if it has none).
+        private static float ChestHalfWidth(GameObject chestGo, Vector3 side)
+        {
+            float best = 0f;
+            Vector3 origin = chestGo.transform.position;
+            foreach (var col in chestGo.GetComponentsInChildren<Collider>())
+            {
+                if (col == null || col.isTrigger || !col.enabled) continue;
+                // The collider's own box (the chest is turned at random, and a world-aligned box around it reaches further
+                // than its side does).
+                Bounds cb;
+                Matrix4x4 toWorld = col.transform.localToWorldMatrix;
+                if (col is MeshCollider mc && mc.sharedMesh != null) cb = mc.sharedMesh.bounds;
+                else if (col is BoxCollider bc) cb = new Bounds(bc.center, bc.size);
+                else { cb = col.bounds; toWorld = Matrix4x4.identity; }
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = toWorld.MultiplyPoint3x4(new Vector3((i & 1) == 0 ? cb.min.x : cb.max.x, (i & 2) == 0 ? cb.min.y : cb.max.y, (i & 4) == 0 ? cb.min.z : cb.max.z));
+                    best = Mathf.Max(best, Vector3.Dot(corner - origin, side));
+                }
+            }
+            return best > 0.05f ? best : 0.5f;
+        }
+
+        // The ground under 'pos': the terrain height (the camp's levelled heightmap), or a floor piece above it (a
+        // blueprint camp). The chest's own colliders don't count.
+        private static float GroundHeightAt(Vector3 pos, GameObject chestGo, float fallback, out string from)
+        {
+            float y = fallback;
+            from = "the chest's base";
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(pos, out float terrain))
+            {
+                y = terrain;
+                from = "terrain";
+            }
+            int mask = LayerMask.GetMask("piece", "Default", "static_solid", "Default_small");
+            foreach (var hit in Physics.RaycastAll(new Vector3(pos.x, y + 1.5f, pos.z), Vector3.down, 2.5f, mask, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider == null || hit.collider.transform.IsChildOf(chestGo.transform)) continue;
+                if (hit.point.y > y + 0.01f && hit.point.y < y + 1.2f)
+                {
+                    y = hit.point.y;
+                    from = "piece " + hit.collider.name;
+                }
+            }
+            return y;
+        }
+
+        private static Bounds LocalMeshBounds(Transform root)
+        {
+            bool any = false;
+            var bounds = new Bounds();
+            Matrix4x4 toRoot = root.worldToLocalMatrix;
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh == null) continue;
+                Matrix4x4 m = toRoot * mf.transform.localToWorldMatrix;
+                Bounds mb = mf.sharedMesh.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var p = m.MultiplyPoint3x4(new Vector3((i & 1) == 0 ? mb.min.x : mb.max.x, (i & 2) == 0 ? mb.min.y : mb.max.y, (i & 4) == 0 ? mb.min.z : mb.max.z));
+                    if (!any) { bounds = new Bounds(p, Vector3.zero); any = true; }
+                    else bounds.Encapsulate(p);
+                }
+            }
+            return bounds;
+        }
+
+        private static bool TryWorldRendererBounds(Transform root, out Bounds bounds)
+        {
+            bounds = new Bounds();
+            bool any = false;
+            foreach (var r in root.GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || !r.enabled || r is ParticleSystemRenderer) continue;
+                if (!any) { bounds = r.bounds; any = true; }
+                else bounds.Encapsulate(r.bounds);
+            }
+            return any;
         }
 
         /// <summary>
@@ -1331,6 +2151,10 @@ namespace VerdantsAscent.Managers.Camp
             foreach (var c in root.GetComponentsInChildren<ZSyncTransform>(true)) kill(c);
             foreach (var c in root.GetComponentsInChildren<ItemDrop>(true))         kill(c);
             foreach (var c in root.GetComponentsInChildren<ZNetView>(true))         kill(c);
+            // Joints before their Rigidbodies (R76/R77: "Can't remove Rigidbody because ConfigurableJoint depends on it"):
+            // the HoboStick's AttachPoint carries a ConfigurableJoint (HoboStickPhysicsSetup), and Unity refuses to remove
+            // a Rigidbody a joint still needs, so the decoration kept its physics body.
+            foreach (var c in root.GetComponentsInChildren<Joint>(true))            kill(c);
             foreach (var c in root.GetComponentsInChildren<Rigidbody>(true))        kill(c);
             foreach (var c in root.GetComponentsInChildren<Collider>(true))         kill(c);
             foreach (var c in root.GetComponentsInChildren<Floating>(true))         kill(c);
@@ -1604,7 +2428,7 @@ namespace VerdantsAscent.Managers.Camp
 
         // ── Pack-up ───────────────────────────────────────────────────
 
-        private void PackUpCamp(BackpackCampMarker marker)
+        private void PackUpCamp(BackpackCampMarker marker, bool packAnyway = false)
         {
             var player = Player.m_localPlayer;
             if (player == null) return;
@@ -1618,11 +2442,22 @@ namespace VerdantsAscent.Managers.Camp
                 return;
             }
 
+            // 1.0.35: where every camp piece stands, in the camp frame, read before anything is taken down.
+            string campLayout = null;
+            string campTerrain = null;   // 1.0.36: the camp ground, carried in the bag (FAT)
+            try
+            {
+                var spots = CampLayout.Capture(marker);
+                campLayout = CampLayout.Encode(spots);
+                Debug.Log($"[VABackpacks] camp layout saved: {spots.Count} camp piece(s) ({string.Join(", ", spots.Keys)}), facing {marker.CampYaw:0}");
+                campTerrain = CampTerrainCarry.Capture(CampRing.Centre(marker), marker.CampYaw, CampRing.Radius(marker));   // 1.0.41: the same ring   // 1.0.40: the save ring
+            }
+            catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp layout capture failed: {ex.Message}"); }
+
             // Save the chest's contents back into a backpack item's
             // customData blob, then spawn that item on the ground.
             var chestGo = marker.gameObject;
             var container = chestGo.GetComponent<Container>();
-            string base64 = SerializeContainerToBase64(container);
 
             // Resolve the original backpack prefab so we can spawn a
             // matching ItemDrop with the saved storage.
@@ -1632,6 +2467,83 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogError($"[VABackpacks] Pack-up failed: prefab '{marker.BackpackPrefabName}' missing.");
                 return;
             }
+
+            // 1.0.44 (Fire: "the whole building stayed standing": the capture refused, 183 pieces over the level-1 cap of 100,
+            // but the pack-up went on and took the chest, the camp pieces and the ground). The capture's read-only checks run
+            // FIRST; a refusal stops the pack-up with nothing touched, and its message says why.
+            try
+            {
+                var check = backpackPrefab.GetComponent<ItemDrop>().m_itemData.Clone();
+                check.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+                RestoreItemState(check, marker.BackpackItemState);
+                string ok = CampCapture.Capture(player, CampRing.Centre(marker), CampRing.Radius(marker), 0f, CampLevels.Level(check),
+                    out string checkLine, out _, checkOnly: true);
+                if (!packAnyway && checkLine != null && checkLine.Contains("refused"))
+                {
+                    // An open chest is a hard refusal (its message is already up). Over the cap or the data limit, Fire's
+                    // choice (1.0.44): ask. No = nothing touched; Yes = pack up to the limit and leave the rest standing.
+                    if (checkLine.Contains("chest is open"))
+                    {
+                        Debug.Log($"[VABackpacks] {checkLine} (pack-up stopped before anything was removed; the camp stays as it is)");
+                        return;
+                    }
+                    int level = CampLevels.Level(check), cap = CampLevels.PieceCap(level), ringCount = CampCapture.LastInRing;
+                    string text = checkLine.Contains("blueprint is")
+                        ? $"The buildings in this camp are more data than one bag holds ({ringCount} pieces in the ring). Packing will leave the farthest pieces behind, standing. Pack anyway?"
+                        : $"Packing this camp will leave {ringCount - cap} pieces behind ({ringCount} in the ring, the bag holds {cap}). Pack anyway?";
+                    Debug.Log($"[VABackpacks] {checkLine}; asking the player (Yes = pack up to the limit, No = nothing touched)");
+                    var target = marker;
+                    UnifiedPopup.Push(new YesNoPopup("Camp over its limit", text,
+                        () => { UnifiedPopup.Pop(); Debug.Log("[VABackpacks] pack anyway: Yes"); if (target != null) PackUpCamp(target, packAnyway: true); },
+                        () => { UnifiedPopup.Pop(); Debug.Log("[VABackpacks] pack anyway: No; the camp stays as it is"); },
+                        localizeText: false));
+                    return;
+                }
+            }
+            catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp pack-up check failed: {ex.Message}"); }
+
+            // 1.0.25 (Fire 10-08, camp dupes): the chest goes FIRST and its ZDO is checked gone before the bag comes back.
+            // Before, the bag came back first and the chest was destroyed last by a local ownership claim, so a chest whose
+            // destroy did not take (or an exception in between) left the chest with its contents AND the bag with them.
+            var chestView = chestGo.GetComponent<ZNetView>();
+            if (chestView == null || !chestView.IsValid())
+            {
+                Debug.LogWarning("[VABackpacks] Pack-up: the camp chest has no live ZDO; nothing packed.");
+                return;
+            }
+            ZDOID chestId = chestView.GetZDO().m_uid;
+            if (!chestView.IsOwner()) chestView.ClaimOwnership();
+            string base64 = SerializeContainerToBase64(container);
+            int contentCount = container?.GetInventory()?.GetAllItems().Count ?? 0;
+            BackpackCampRegistry.Unregister(marker);
+            ZNetScene.instance.Destroy(chestGo);
+            if (!DestroyedOrQueued(chestId))
+            {
+                // The local object is gone but the ZDO is not, so the chest comes back with its contents: give nothing back.
+                Debug.LogError($"[VABackpacks] Pack-up: chest {chestId} is still in the world after the destroy; nothing packed.");
+                MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "Pack-up failed: the camp chest is still in use. Try again.");
+                return;
+            }
+
+            // 1.0.29 (camp upgrades step 2): the player's own pieces inside the camp level's radius go into the bag. The
+            // level is the bag's saved quality. Nothing is taken when the capture refuses (cap, size, an open chest).
+            string campBlueprint = null;
+            CampStorage.Totals campStorage = null;
+            string campUid = null;
+            try
+            {
+                var probe = backpackPrefab.GetComponent<ItemDrop>().m_itemData.Clone();
+                probe.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+                RestoreItemState(probe, marker.BackpackItemState);
+                probe.m_customData.TryGetValue(CampUidKey, out campUid);
+                Vector3 ringCentre = CampRing.Centre(marker);
+                float ringRadius = CampRing.Radius(marker);
+                Debug.Log($"[VABackpacks] capture disc centre {ringCentre} radius {ringRadius:0.##} == ring centre {CampRing.Centre(marker)} radius {CampRing.Radius(marker):0.##} (CampRing, one definition)");
+                campBlueprint = CampCapture.Capture(player, ringCentre, ringRadius, 0f, CampLevels.Level(probe), out string captureLine, out campStorage,
+                    partial: packAnyway, first: marker.DeployedPieceIds);
+                if (captureLine != null) Debug.Log($"[VABackpacks] {captureLine}");
+            }
+            catch (Exception ex) { Debug.LogError($"[VABackpacks] camp pack-up capture failed: {ex}"); }
 
             // Hand the backpack data back to the player. Two paths:
             //
@@ -1650,21 +2562,61 @@ namespace VerdantsAscent.Managers.Camp
             // This eliminates the "duplicated HoboStick after logout/
             // login" issue: even if the original removal silently failed
             // last session, pack-up now reconciles instead of doubling.
+            //
+            // 1.0.22: only a HOLLOW copy (not worn, no contents, no special-slot items) counts as the camp's own bag. A bag the
+            // player carries with things in it is never overwritten (1.0.21 replaced its contents with the chest's). Either way
+            // the bag gets back its own saved state (quality, special slots, …; marker.BackpackItemState) before the contents.
+            string state = marker.BackpackItemState;
+            ItemDrop.ItemData returned = null;
             bool gaveToInventory = false;
             try
             {
                 var inv = player.GetInventory();
                 if (inv != null)
                 {
+                    // 1.0.34 (Fire: a bar-slot camp left the staff in the hand and the pack-up gave a SECOND staff): the
+                    // item the camp was made from carries the camp's id. If it is still on the player, the pack-up returns
+                    // into THAT item and never makes a new one. A copy left only in a hand (not in the inventory) is a
+                    // ghost: it is unequipped, and the bag comes back the normal way.
+                    ItemDrop.ItemData original = FindCampOriginal(player, inv, campUid);
+                    if (original != null)
+                    {
+                        bool inInventory = inv.ContainsItem(original);
+                        if (player.IsItemEquiped(original) || player.RightItem == original || player.LeftItem == original)
+                        {
+                            try { player.UnequipItem(original, false); } catch { }
+                            original.m_equipped = false;
+                        }
+                        Debug.Log($"[VABackpacks] Pack-up: the camp's own {marker.BackpackPrefabName} (camp id {campUid}) is still on the player " +
+                                  $"({(inInventory ? "in the inventory: the contents go back into it, no new one" : "only in a hand: unequipped as a ghost")})");
+                        if (inInventory)
+                        {
+                            RestoreItemState(original, state);
+                            if (!string.IsNullOrEmpty(base64)) original.m_customData[BackpackApi.CUSTOM_DATA_KEY] = base64;
+                            if (campBlueprint != null) { original.m_customData[CampCapture.CustomDataKey] = campBlueprint; CampStorage.Write(original, campStorage); }
+                            CampLayout.Write(original, campLayout);
+                            CampTerrainCarry.Write(original, campTerrain);
+                            returned = original;
+                            gaveToInventory = true;
+                        }
+                    }
+                    var worn = BackpackApi.GetEquippedBackpacks(player);
+                    if (!gaveToInventory)
                     foreach (var existing in inv.GetAllItems())
                     {
                         if (existing?.m_dropPrefab == null) continue;
                         if (existing.m_dropPrefab.name != marker.BackpackPrefabName) continue;
+                        if (existing.m_equipped || (worn != null && worn.Contains(existing)) || !IsHollowBag(existing)) continue;
 
+                        RestoreItemState(existing, state);
                         if (existing.m_customData == null)
                             existing.m_customData = new System.Collections.Generic.Dictionary<string, string>();
                         if (!string.IsNullOrEmpty(base64))
                             existing.m_customData[BackpackApi.CUSTOM_DATA_KEY] = base64;
+                        if (campBlueprint != null) { existing.m_customData[CampCapture.CustomDataKey] = campBlueprint; CampStorage.Write(existing, campStorage); }
+                        CampLayout.Write(existing, campLayout);
+                        CampTerrainCarry.Write(existing, campTerrain);
+                        returned = existing;
                         gaveToInventory = true;
                         Debug.Log($"[VABackpacks] Pack-up: merged contents into existing {marker.BackpackPrefabName} in player inventory (no duplicate spawned).");
                         break;
@@ -1676,26 +2628,76 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogWarning($"[VABackpacks] Pack-up inventory-merge check failed: {ex.Message}");
             }
 
+            string where = "the carried bag";
             if (!gaveToInventory)
             {
-                Vector3 spawnPos = chestGo.transform.position + Vector3.up * 0.5f;
-                var newDrop = UnityEngine.Object.Instantiate(backpackPrefab, spawnPos, Quaternion.identity);
-                var newItem = newDrop.GetComponent<ItemDrop>();
-                if (newItem != null && newItem.m_itemData != null)
+                // 1.0.26 (round 12: "after the pack-up the bag is missing", a quality-2 bag "no bag came back"): the bag comes
+                // back INTO the inventory, as a pickup would. 1.0.22-1.0.25 spawned it as a drop on top of the chest, where the
+                // player doesn't look and the terrain restore right after can bury it. Only a full inventory drops it, at the
+                // player's feet.
+                ItemDrop.ItemData bagItem = null;
+                try
                 {
-                    if (newItem.m_itemData.m_customData == null)
-                        newItem.m_itemData.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+                    bagItem = backpackPrefab.GetComponent<ItemDrop>().m_itemData.Clone();
+                    bagItem.m_dropPrefab = backpackPrefab;
+                    bagItem.m_stack = 1;
+                    bagItem.m_equipped = false;
+                    bagItem.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+                    RestoreItemState(bagItem, state);
+                    if (bagItem.m_customData == null)
+                        bagItem.m_customData = new System.Collections.Generic.Dictionary<string, string>();
                     if (!string.IsNullOrEmpty(base64))
-                        newItem.m_itemData.m_customData[BackpackApi.CUSTOM_DATA_KEY] = base64;
+                        bagItem.m_customData[BackpackApi.CUSTOM_DATA_KEY] = base64;
+                    if (campBlueprint != null) { bagItem.m_customData[CampCapture.CustomDataKey] = campBlueprint; CampStorage.Write(bagItem, campStorage); }
+                    CampLayout.Write(bagItem, campLayout);
+                    CampTerrainCarry.Write(bagItem, campTerrain);
+                    bagItem.m_equipped = false;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[VABackpacks] Pack-up: could not rebuild the {marker.BackpackPrefabName}: {ex}");
+                }
+                if (bagItem != null)
+                {
+                    var inv = player.GetInventory();
+                    bool added = false;
+                    try { added = inv != null && inv.CanAddItem(bagItem, 1) && inv.AddItem(bagItem); }
+                    catch (Exception ex) { Debug.LogWarning($"[VABackpacks] Pack-up: adding the bag to the inventory failed: {ex.Message}"); }
+                    if (added)
+                    {
+                        returned = bagItem;
+                        where = "the inventory";
+                    }
+                    else
+                    {
+                        Vector3 feet = player.transform.position + player.transform.forward * 0.6f + Vector3.up * 0.6f;
+                        ItemDrop back = ItemDrop.DropItem(bagItem, 0, feet, Quaternion.identity);
+                        returned = back != null ? back.m_itemData : bagItem;
+                        where = $"a drop at the player's feet {GetZdoId(back != null ? back.gameObject : null)} (the inventory is full)";
+                    }
                 }
             }
+            Debug.Log($"[VABackpacks] Pack-up: chest {chestId} destroyed, contents {contentCount} moved into {where}");
+            if (returned != null)
+                Debug.Log($"[VABackpacks] Pack-up: {marker.BackpackPrefabName} back at quality {returned.m_quality}, " +
+                          $"{(returned.m_customData?.Keys.Count(k => k.StartsWith(SpecialSlotKeyPrefix, StringComparison.Ordinal)) ?? 0)} special slot(s) filled" +
+                          (string.IsNullOrEmpty(state) ? " (a camp from before 1.0.22: its bag's quality and special slots were not kept)" : ""));
 
             // Restore the heightmap + paint mask from the snapshot we
             // took at deploy. This is the WEC undo pattern — exact
             // pre-deploy state, no rogue TerrainModifier piece needed.
             // (If terrainSnapshotBase64 is empty, we ran the legacy
             // mud_road fallback at deploy and rely on its destroy below.)
-            if (!string.IsNullOrEmpty(marker.TerrainSnapshotBase64))
+            // 1.0.41 (Fire fell through the world on a pack-up): who stands in the ring before the ground changes under them.
+            var inRing = CharactersInRing(CampRing.Centre(marker), CampRing.Radius(marker));
+            // 1.0.44 (Fire: never flatten the ground under pieces left behind): a partial pack keeps the ground as it is.
+            bool keepGround = packAnyway && CampCapture.LastLeftBehind > 0;
+            if (keepGround)
+                Debug.Log($"[VABackpacks] pack-up: {CampCapture.LastLeftBehind} piece(s) left standing, so the ground stays as it is (no restore)");
+            // 1.0.74 (Fire 10-15): the exact pre-camp capture (heightmap + paint + voxel) when the camp has one; the old restores
+            // below only for a camp without it (an older FAT at deploy, or a camp from before 1.0.74)
+            bool exact = !keepGround && CampTerrainCarry.RestorePreCamp(marker.PreCamp, "pack-up");
+            if (!keepGround && !exact && !string.IsNullOrEmpty(marker.TerrainSnapshotBase64))
             {
                 try
                 {
@@ -1707,6 +2709,8 @@ namespace VerdantsAscent.Managers.Camp
                     Debug.LogWarning($"[VABackpacks] Terrain restore failed: {ex.Message}");
                 }
             }
+            if (!keepGround && !exact) CampTerrainCarry.RestoreGround(marker.GroundBefore, marker.CampCenter, marker.CampYaw, "pack-up");   // 1.0.36
+            StartCoroutine(LiftAboveGround(inRing));
 
             // CLEAR THE PLAYER'S BOUND SPAWN BEFORE we destroy the bed.
             // Vanilla Bed.IsCurrent() reads m_spawnPoint.position, and
@@ -1767,19 +2771,22 @@ namespace VerdantsAscent.Managers.Camp
             //     standing on a hole when the chest disappears.
             //   - cooking station before campfire (it sits on the fire).
             //   - everything else can drop in any order.
-            DestroyByZdoId(marker.TerrainModZdoId);
-            DestroyByZdoId(marker.CookingStationZdoId);
-            DestroyByZdoId(marker.CampfireZdoId);
-            DestroyByZdoId(marker.WorkbenchZdoId);
-            DestroyByZdoId(marker.BedZdoId);
-            DestroyByZdoId(marker.WoodpileZdoId);
-            DestroyByZdoId(marker.ChairZdoId);
+            // 1.0.25: each on its own, so one piece that throws can't stop the rest (the bag is already back).
+            foreach (var pieceId in new[] { marker.TerrainModZdoId, marker.CookingStationZdoId, marker.CampfireZdoId,
+                                            marker.WorkbenchZdoId, marker.BedZdoId, marker.WoodpileZdoId, marker.ChairZdoId })
+            {
+                try { DestroyByZdoId(pieceId); }
+                catch (Exception ex) { Debug.LogWarning($"[VABackpacks] Pack-up: could not remove camp piece {pieceId}: {ex.Message}"); }
+            }
             // Blueprint-spawned pieces (if a blueprint was used) — same
             // destroy-by-ZDOID treatment.
             if (marker.BlueprintPieceZdoIds != null)
             {
                 foreach (var bpId in marker.BlueprintPieceZdoIds)
-                    DestroyByZdoId(bpId);
+                {
+                    try { DestroyByZdoId(bpId); }
+                    catch (Exception ex) { Debug.LogWarning($"[VABackpacks] Pack-up: could not remove blueprint piece {bpId}: {ex.Message}"); }
+                }
             }
 
             // Defense-in-depth: sweep the camp radius for any piece
@@ -1813,6 +2820,8 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogWarning($"[VABackpacks] Pack-up radius-scan cleanup failed: {ex.Message}");
             }
 
+            CleanCampPins(player, null, "pack-up");   // 1.0.35: the recorded camp pins go, no other pin
+
             // Remove the camp's map pin (only on the local player who
             // placed it — vanilla pins are local-profile-scoped). We
             // walk m_pins for any pin named "Camp" within ~1m of the
@@ -1842,10 +2851,8 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogWarning($"[VABackpacks] Failed to remove camp map pin: {ex.Message}");
             }
 
-            // Unregister and despawn the chest itself last.
-            BackpackCampRegistry.Unregister(marker);
+            // (1.0.25: the chest itself went first, above.)
             UnregisterVegetationClearArea(marker.CampCenter);
-            DestroyZNetObject(chestGo);
 
             // Reset grass over the camp footprint so the area visually
             // matches the now-restored heightmap (tall grass blades that
@@ -1927,6 +2934,72 @@ namespace VerdantsAscent.Managers.Camp
                 return false;
             }
             return true;
+        }
+
+        // 1.0.35 (Fire's map: several stacked CAMP pins; never delete a player's own pins). Every pin a deploy adds is
+        // recorded on the player (position, name "Camp"); only a pin that matches a recorded one is ever removed. Deploy and
+        // pack-up remove all recorded pins; at load the newest is kept while the player has a camp. Old unrecorded pins
+        // are left alone (pack-up still removes a "Camp" pin within 2 m of the camp it packs, as before).
+        private const string KEY_CAMP_PINS = "va_camp_pins";   // "x,z;x,z;..." oldest first
+        private static bool _pinsCleaned;
+
+        private static List<Vector2> RecordedPins(Player player)
+        {
+            var list = new List<Vector2>();
+            if (player?.m_customData == null || !player.m_customData.TryGetValue(KEY_CAMP_PINS, out var raw) || string.IsNullOrEmpty(raw)) return list;
+            foreach (string e in raw.Split(';'))
+            {
+                string[] f = e.Split(',');
+                if (f.Length == 2 && float.TryParse(f[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x)
+                    && float.TryParse(f[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float z))
+                    list.Add(new Vector2(x, z));
+            }
+            return list;
+        }
+
+        private static void SaveRecordedPins(Player player, List<Vector2> list)
+        {
+            if (player?.m_customData == null) return;
+            if (list.Count == 0) { player.m_customData.Remove(KEY_CAMP_PINS); return; }
+            player.m_customData[KEY_CAMP_PINS] = string.Join(";", list.Select(v =>
+                v.x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "," + v.y.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        private static void RecordCampPin(Player player, Vector3 pos)
+        {
+            var list = RecordedPins(player);
+            list.Add(new Vector2(pos.x, pos.z));
+            SaveRecordedPins(player, list);
+        }
+
+        private static void CleanCampPins(Player player, Vector3? unused, string why)
+        {
+            if (Minimap.instance == null || player == null) return;
+            try
+            {
+                var recorded = RecordedPins(player);
+                if (recorded.Count == 0) return;
+                bool keepNewest = why == "load" && player.m_customData != null
+                    && player.m_customData.TryGetValue(KEY_PLAYER_CAMP, out var raw) && !string.IsNullOrEmpty(raw);
+                var remove = keepNewest ? recorded.Take(recorded.Count - 1).ToList() : recorded;
+                int removed = 0;
+                var pins = Minimap.instance.m_pins;
+                foreach (Vector2 r in remove)
+                {
+                    for (int i = pins.Count - 1; i >= 0; i--)
+                    {
+                        var pin = pins[i];
+                        if (pin == null || pin.m_name != "Camp" || pin.m_type != Minimap.PinType.Bed) continue;
+                        float dx = pin.m_pos.x - r.x, dz = pin.m_pos.z - r.y;
+                        if (dx * dx + dz * dz > 0.01f) continue;   // the exact recorded spot
+                        Minimap.instance.RemovePin(pin);
+                        removed++;
+                    }
+                }
+                SaveRecordedPins(player, keepNewest ? recorded.Skip(recorded.Count - 1).ToList() : new List<Vector2>());
+                Debug.Log($"[VABackpacks] camp pins ({why}): {removed} recorded camp pin(s) removed{(keepNewest ? ", the current camp's kept" : "")}; other pins untouched");
+            }
+            catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp pin cleanup ({why}) failed: {ex.Message}"); }
         }
 
         private static void SetActiveCamp(Player player, ZDOID id)
@@ -2020,6 +3093,27 @@ namespace VerdantsAscent.Managers.Camp
             return anchor + away * radius;
         }
 
+        private static System.Collections.IEnumerator VerifyGroundLater((string role, GameObject go)[] pieces)
+        {
+            yield return new WaitForSeconds(3f);
+            var parts = new List<string>();
+            float worst = 0f;
+            foreach (var (role, go) in pieces)
+            {
+                if (go == null) continue;
+                Vector3 p = go.transform.position;
+                float g = GroundAtForLog(p);
+                if (float.IsNaN(g)) { parts.Add($"{role} no read"); continue; }
+                float d = p.y - g;
+                if (Mathf.Abs(d) > Mathf.Abs(worst)) worst = d;
+                parts.Add($"{role} {d:+0.00;-0.00}");
+            }
+            Debug.Log($"[VABackpacks] camp ground after 3 s (piece y - ground): {string.Join(", ", parts.ToArray())}; worst {worst:+0.00;-0.00} m{(Mathf.Abs(worst) > 0.15f ? " - OVER 0.15: the ground changed after placement" : "")}");
+        }
+
+        // 1.0.73: the ground for the terrain-write lines (the same read as the piece placement)
+        private static float GroundAtForLog(Vector3 at) => CampGround.Sample(at.x, at.z, at.y, out float y, out _) ? y : float.NaN;
+
         private static Vector3 SnapToGround(Vector3 pos)
         {
             if (ZoneSystem.instance != null
@@ -2054,24 +3148,25 @@ namespace VerdantsAscent.Managers.Camp
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] ResizeContainer: {ex.Message}"); }
         }
 
-        private static void LoadBackpackContentsIntoContainer(GameObject chestGo, ItemDrop.ItemData backpackItem)
+        // 1.0.25: returns the number of items loaded, 0 for an empty bag, -1 when the contents could not be loaded.
+        private static int LoadBackpackContentsIntoContainer(GameObject chestGo, ItemDrop.ItemData backpackItem)
         {
             if (chestGo == null || backpackItem == null)
             {
                 Debug.LogWarning($"[VABackpacks] LoadBackpackContentsIntoContainer: chestGo={chestGo!=null}, backpackItem={backpackItem!=null} — bailing.");
-                return;
+                return -1;
             }
             var container = chestGo.GetComponent<Container>();
             if (container == null)
             {
                 Debug.LogWarning("[VABackpacks] LoadBackpackContentsIntoContainer: chest has no Container component.");
-                return;
+                return -1;
             }
             var inv = container.GetInventory();
             if (inv == null)
             {
                 Debug.LogWarning("[VABackpacks] LoadBackpackContentsIntoContainer: container.GetInventory() returned null.");
-                return;
+                return -1;
             }
 
             string base64 = backpackItem.m_customData != null
@@ -2079,10 +3174,12 @@ namespace VerdantsAscent.Managers.Camp
                 ? s : null;
             if (string.IsNullOrEmpty(base64))
             {
-                Debug.LogWarning($"[VABackpacks] LoadBackpackContentsIntoContainer: drop's customData has no '{BackpackApi.CUSTOM_DATA_KEY}' key " +
-                                 $"(customData entries: {(backpackItem.m_customData != null ? backpackItem.m_customData.Count : 0)}). " +
-                                 $"Chest will spawn empty — the unequip-sync didn't save the bag.");
-                return;
+                // An empty bag writes no key: VAInventory's BackpackStorageSync.HandleUnequipped only writes when it captured
+                // items, and a fresh bag has never had one (R77's drill stick). So no key reads as an EMPTY bag, not a loss;
+                // a lost bag would show items in the bag block before the unequip and none after.
+                Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: no saved '{BackpackApi.CUSTOM_DATA_KEY}' in the bag " +
+                          $"(customData entries: {(backpackItem.m_customData != null ? backpackItem.m_customData.Count : 0)}): an empty bag, so the chest starts empty.");
+                return 0;
             }
             Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: loading {base64.Length} chars of base64 into chest ({inv.GetWidth()}x{inv.GetHeight()}).");
 
@@ -2091,11 +3188,77 @@ namespace VerdantsAscent.Managers.Camp
                 var pkg = new ZPackage(base64);
                 inv.Load(pkg);
                 Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: loaded {inv.GetAllItems().Count} items into chest.");
+                return inv.GetAllItems().Count;
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[VABackpacks] Failed to load backpack contents into chest: {ex.Message}");
+                return -1;
             }
+        }
+
+        // ── 1.0.22: the bag's own item state across a camp ────────────────────────────────────────────────────────────────
+        // Deploy destroys the dropped bag; its contents go into the chest, and (before 1.0.22) everything else about the bag was
+        // lost: a quality-2 bag came back quality 1 with its tool/resources/bypass items gone. The state is kept in vanilla's own
+        // item format (ItemData.Save/Load, the bytes an ItemDrop keeps in its ZDO), minus the contents blob, on the chest's ZDO.
+        private const string SpecialSlotKeyPrefix = "BackpackSpecial.";
+        private static readonly byte ItemFormatVersion =
+            (byte)Enum.GetValues(typeof(global::Version.Item)).Cast<int>().Max();
+
+        private static string CaptureItemState(ItemDrop.ItemData item)
+        {
+            if (item == null) return string.Empty;
+            try
+            {
+                ItemDrop.ItemData copy = item.Clone();
+                copy.m_customData = item.m_customData != null
+                    ? new System.Collections.Generic.Dictionary<string, string>(item.m_customData)
+                    : new System.Collections.Generic.Dictionary<string, string>();
+                copy.m_customData.Remove(BackpackApi.CUSTOM_DATA_KEY);
+                copy.m_equipped = false;
+                var pkg = new ZPackage();
+                pkg.Write(ItemFormatVersion);
+                copy.Save(pkg);
+                return pkg.GetBase64();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[VABackpacks] Camp: could not keep the bag's item state: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        // Puts a captured state back onto a bag item, keeping the item's own place in the inventory. Nothing changes for an empty
+        // or unreadable state (camps deployed before 1.0.22).
+        private static void RestoreItemState(ItemDrop.ItemData item, string state)
+        {
+            if (item == null || string.IsNullOrEmpty(state)) return;
+            try
+            {
+                var pkg = new ZPackage(state);
+                var version = (global::Version.Item)pkg.ReadByte();
+                Vector2i place = item.m_gridPos;
+                bool equipped = item.m_equipped;
+                ItemDrop.ItemData.Load(pkg, item, version);
+                CampStorage.Clear(item);   // 1.0.32: the packed camp's storage totals belong with its blueprint
+                item.m_customData?.Remove(CampCapture.CustomDataKey);   // 1.0.29: a blueprint lives in the bag OR in the world, never in the saved state
+                item.m_gridPos = place;
+                item.m_equipped = equipped;
+                if (item.m_customData == null) item.m_customData = new System.Collections.Generic.Dictionary<string, string>();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[VABackpacks] Camp: could not restore the bag's item state: {ex.Message}");
+            }
+        }
+
+        // A bag with nothing in it: no contents blob and no special-slot items.
+        private static bool IsHollowBag(ItemDrop.ItemData item)
+        {
+            if (item?.m_customData == null) return true;
+            if (item.m_customData.TryGetValue(BackpackApi.CUSTOM_DATA_KEY, out var blob) && !string.IsNullOrEmpty(blob)) return false;
+            if (CampCapture.HasBlueprint(item)) return false;   // 1.0.29: a bag carrying a packed camp is never overwritten
+            return !item.m_customData.Keys.Any(k => k.StartsWith(SpecialSlotKeyPrefix, StringComparison.Ordinal));
         }
 
         private static string SerializeContainerToBase64(Container container)

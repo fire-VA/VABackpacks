@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -83,10 +83,10 @@ namespace VerdantsAscent.Managers
         // is also set so Inventory.Save round-trips the equipped state
         // correctly across logout.
         //
-        // Trade-off: while a backpack is in our dict (not m_shoulderItem),
-        // vanilla's SetupVisEquipment doesn't render its mesh on the
-        // player's back. Cape visual takes priority. Functional behavior
-        // (status effects, weight, customData) is unaffected.
+        // While a backpack is in our dict (not m_shoulderItem), vanilla's
+        // VisEquipment doesn't draw it, so BackpackWornVisual (1.0.24)
+        // draws the bag's worn model on the player's back itself, next to
+        // any cape.
         private static readonly Dictionary<Humanoid, ItemDrop.ItemData> _equippedBackpacks = new();
 
         /// <summary>True if <paramref name="humanoid"/> currently has a
@@ -98,6 +98,15 @@ namespace VerdantsAscent.Managers
 
         /// <summary>Public accessor used by BackpackApi to find the
         /// currently-equipped backpack on a Player.</summary>
+        /// <summary>1.0.20: the live bag inventory on the player's Container in legacy mode (null otherwise), and the bag that owns it.</summary>
+        internal static Inventory LegacyLiveInventory(Player player, out ItemDrop.ItemData owner)
+        {
+            owner = _activeContainerOwner;
+            if (!LegacyMode || player == null || owner == null) return null;
+            Container c = player.GetComponent<Container>();
+            return c != null ? (Inventory)_containerInventoryField?.GetValue(c) : null;
+        }
+
         public static ItemDrop.ItemData FindEquippedBackpackPublic(Player player)
             => FindEquippedBackpack(player);
 
@@ -733,7 +742,9 @@ namespace VerdantsAscent.Managers
                 Container container = player.gameObject.GetComponent<Container>();
                 if (container == null)
                 {
-                    Debug.LogError($"{MyMod.PluginName}: No Container on player during equip!");
+                    // 1.0.33: at character load the worn bags are equipped again before VAInventory switches VABackpacks out of
+                    // legacy mode, so there is no legacy Container yet; VAInventory takes the storage over right after. Harmless.
+                    if (ConfigManager.Instance?.configVerboseLogging?.Value == true) Debug.Log($"{MyMod.PluginName}: no legacy Container on the player during equip (load-time, before VAInventory takes over storage)");
                 }
                 else
                 {
@@ -974,16 +985,26 @@ namespace VerdantsAscent.Managers
                 Inventory inv = (Inventory)_containerInventoryField?.GetValue(container);
                 if (inv == null || !_configs.TryGetValue(__instance.m_dropPrefab.name, out var config)) return;
 
-                float reduced = inv.GetTotalWeight() * config.WeightReduction;
+                // 1.0.49: a bag bonus (FRC) multiplies the contents' weight too; 1 without one
+                float[] bonus = BackpackApi.GetBonus(__instance);
+                float factor = bonus != null ? bonus[BackpackApi.BonusContentsWeightFactor] : 1f;
+                float reduced = inv.GetTotalWeight() * config.WeightReduction * factor;
                 __result += reduced;
             }
         }
 
+        private static int s_updateFrame = -1;
+
         public static void Update()
         {
+            // 1.0.22: MyMod.Update calls this AND a Harmony postfix on MyMod.Update calls it again, so a single B press
+            // toggled twice in one frame (with VAInventory: Show, then Hide). Once per frame.
+            if (Time.frameCount == s_updateFrame) return;
+            s_updateFrame = Time.frameCount;
             if (Player.m_localPlayer == null || InventoryGui.instance == null) return;
 
-            if (Input.GetKeyDown(ConfigManager.Instance.configBackpackHotkey.Value))
+            // 1.0.43 (Fire: no keybinds while typing, e.g. in the hammer filter): raw hotkeys wait while a text field has input.
+            if (!IsFiresInputCaptured() && Input.GetKeyDown(ConfigManager.Instance.configBackpackHotkey.Value))
             {
                 // Never fire the hotkey while another UI owns input. Opening/closing the
                 // backpack (InventoryGui.Show/Hide) under an open chat box, escape menu,
@@ -1048,18 +1069,47 @@ namespace VerdantsAscent.Managers
 
         private static bool _firesGateResolved;
         private static PropertyInfo _firesIsCapturingProp;
+        private static MethodInfo _firesIsTyping;
 
-        private static bool IsFiresInputCaptured()
+        // 1.0.47 (Fire, team-wide: typing in any input field blocks every mod hotkey): Core 0.2.376's
+        // FiresInputBlock.IsTyping() is the one shared check; older Core falls back to IsCapturing.
+        internal static bool IsFiresInputCaptured()
         {
             if (!_firesGateResolved)
             {
                 _firesGateResolved = true;
                 var t = AccessTools.TypeByName("FiresCore.Input.FiresInputBlock");
+                _firesIsTyping = t?.GetMethod("IsTyping", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
                 _firesIsCapturingProp = t?.GetProperty("IsCapturing", BindingFlags.Public | BindingFlags.Static);
+                Debug.Log($"[VABackpacks] typing gate: {(_firesIsTyping != null ? "Core FiresInputBlock.IsTyping()" : _firesIsCapturingProp != null ? "Core FiresInputBlock.IsCapturing (older Core)" : "none (no Core)")}");
             }
-            if (_firesIsCapturingProp == null) return false;
-            try { return (bool)_firesIsCapturingProp.GetValue(null); }
-            catch { return false; }
+            try
+            {
+                if (_firesIsTyping != null) return (bool)_firesIsTyping.Invoke(null, null);
+                if (_firesIsCapturingProp != null) return (bool)_firesIsCapturingProp.GetValue(null);
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>
+        /// 1.0.51: only the cached Rows/Columns follow an in-game config change. Deliberately NOT OnConfigReloaded, which re-runs
+        /// OnEquipItem on the worn bag and so would rebuild its block live, before its contents are saved. The worn bag takes the
+        /// new size on its next equip, through VAInventory's items-safe restore (Fire 10-13).
+        /// </summary>
+        public static void RefreshGridSizes()
+        {
+            if (ConfigManager.Instance == null) return;
+            foreach (string prefabName in BackpackPrefabNames)
+            {
+                if (!_configs.TryGetValue(prefabName, out var cfg)) continue;
+                int rows = ConfigManager.Instance.configBackpackRows[prefabName].Value;
+                int cols = ConfigManager.Instance.configBackpackColumns[prefabName].Value;
+                if (cfg.Rows == rows && cfg.Columns == cols) continue;
+                Debug.Log($"{MyMod.PluginName}: {prefabName} grid {cfg.Columns}x{cfg.Rows} -> {cols}x{rows} (applies on its next equip)");
+                cfg.Rows = rows;
+                cfg.Columns = cols;
+            }
         }
 
         public static void OnConfigReloaded()

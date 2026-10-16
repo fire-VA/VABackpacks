@@ -92,6 +92,107 @@ namespace VerdantsAscent.Managers
         // this same customData field on equip/unequip, so the backpack
         // item carries its inventory wherever it goes (chest, ground, etc).
 
+        // -- Bag bonuses (1.0.49, [fgn] FRC section 15) --
+        // A CONTRACT with FiresRPGCrafting (it sets the field by reflection, no reference to this DLL) and VAInventory.
+        // BonusProvider(bag) returns float[] { carryWeight, contentsWeightFactor, loadedSpeed, extraSlots } - index order
+        // fixed, append-only; null = no bonus. contentsWeightFactor 1 = none, 0.8 = contents weigh 20 % less; loadedSpeed is
+        // added to the movement modifier while the bag HAS contents; extraSlots is reserved (not applied, Fire 10-13).
+        // Without a provider nothing changes.
+
+        public const int BonusCarryWeight = 0, BonusContentsWeightFactor = 1, BonusLoadedSpeed = 2, BonusExtraSlots = 3;
+        private const int BonusLength = 4;
+
+        public static Func<ItemDrop.ItemData, float[]> BonusProvider;
+
+        /// <summary>Raised by RefreshBonus: a worn bag's bonus changed (re-roll, enchant, socket).</summary>
+        public static event Action<Player> BonusChanged;
+
+        private static readonly BepInEx.Logging.ManualLogSource BonusLog = BepInEx.Logging.Logger.CreateLogSource("VABackpacks.Bonus");
+        private static bool s_bonusFailLogged;
+        private static Player s_bonusPlayer;
+        private static int s_bonusFrame = -1;
+        private static float[] s_bonusSum = { 0f, 1f, 0f, 0f };
+
+        /// <summary>One bag's bonus from the provider, always BonusLength long; null when there is none.</summary>
+        public static float[] GetBonus(ItemDrop.ItemData bag)
+        {
+            var provider = BonusProvider;
+            if (provider == null || bag == null || !IsBackpack(bag)) return null;
+            float[] raw;
+            try { raw = provider(bag); }
+            catch (Exception ex)
+            {
+                if (!s_bonusFailLogged) { s_bonusFailLogged = true; BonusLog.LogWarning($"BonusProvider threw {ex.GetType().Name}: {ex.Message} (logged once)"); }
+                return null;
+            }
+            if (raw == null) return null;
+            var b = new float[BonusLength];
+            b[BonusContentsWeightFactor] = 1f;
+            for (int i = 0; i < BonusLength && i < raw.Length; i++) b[i] = raw[i];
+            b[BonusContentsWeightFactor] = Mathf.Clamp01(b[BonusContentsWeightFactor]);
+            return b;
+        }
+
+        /// <summary>The worn bags' bonuses together: carry and speed add, the weight factors multiply. Cached for the frame.</summary>
+        public static float[] GetEquippedBonus(Player player)
+        {
+            if (player == null || BonusProvider == null) return new float[] { 0f, 1f, 0f, 0f };
+            if (player == s_bonusPlayer && Time.frameCount == s_bonusFrame) return s_bonusSum;
+            var sum = new float[] { 0f, 1f, 0f, 0f };
+            foreach (var bag in GetEquippedBackpacks(player))
+            {
+                var b = GetBonus(bag);
+                if (b == null) continue;
+                sum[BonusCarryWeight] += b[BonusCarryWeight];
+                sum[BonusContentsWeightFactor] *= b[BonusContentsWeightFactor];
+                sum[BonusLoadedSpeed] += b[BonusLoadedSpeed];
+                sum[BonusExtraSlots] += b[BonusExtraSlots];
+            }
+            s_bonusPlayer = player; s_bonusFrame = Time.frameCount; s_bonusSum = sum;
+            return sum;
+        }
+
+        /// <summary>FRC calls this (by reflection) after a roll / enchant / socket on a worn bag.</summary>
+        public static void RefreshBonus(Player player)
+        {
+            s_bonusFrame = -1;
+            var b = GetEquippedBonus(player);
+            BonusLog.LogDebug($"bonus refreshed for {player?.GetPlayerName() ?? "?"}: carry +{b[BonusCarryWeight]:0.#}, contents x{b[BonusContentsWeightFactor]:0.##}, loaded speed {b[BonusLoadedSpeed]:+0.###;-0.###;0}");
+            try { BonusChanged?.Invoke(player); } catch (Exception ex) { BonusLog.LogWarning($"BonusChanged handler threw {ex.Message}"); }
+        }
+
+        // -- Worn bag visual (1.0.50, [fgn] FRC rarity aura) --
+        // The bag on a player's back is VABackpacks' own attachment (BackpackWornVisual), not a VisEquipment item, so another mod
+        // that dresses worn gear (FRC's rarity aura) hooks it here. Raised when the visual is built or replaced (the item is null
+        // for ANOTHER player's bag: only its owner knows the item) and on removal (GameObject null).
+        public static event Action<Player, ItemDrop.ItemData, GameObject> WornVisualChanged;
+
+        /// <summary>The worn bag's drawn GameObject on this player, or null. For a refresh after a roll / enchant.</summary>
+        public static GameObject GetWornVisual(Player player) => BackpackWornVisual.WornVisualOf(player);
+
+        internal static void RaiseWornVisualChanged(Player player, ItemDrop.ItemData item, GameObject visual)
+        {
+            var handler = WornVisualChanged;
+            if (handler == null) return;
+            try { handler(player, item, visual); }
+            catch (Exception ex) { BonusLog.LogWarning($"WornVisualChanged handler threw {ex.GetType().Name}: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// 1.0.78, add-only (Core's companions): the shoulder bag a NON-player Humanoid wears, by item prefab name (null or "" = none).
+        /// Writes the humanoid's ZDO "va_bp_worn" (the prefab name's stable hash) on its owner, so every client draws it on the body
+        /// the same way as a player's bag. Players keep their own path (their equipped bag); this call is ignored for a Player.
+        /// Returns false when the humanoid has no valid ZNetView or this client isn't its owner.
+        /// </summary>
+        public static bool SetWornBag(Humanoid humanoid, string bagPrefabName)
+        {
+            if (humanoid == null || humanoid is Player) return false;
+            ZNetView nv = humanoid.GetComponent<ZNetView>();
+            if (nv == null || !nv.IsValid() || !nv.IsOwner()) return false;
+            int hash = string.IsNullOrEmpty(bagPrefabName) ? 0 : bagPrefabName.GetStableHashCode();
+            if (nv.GetZDO().GetInt("va_bp_worn".GetStableHashCode()) != hash) nv.GetZDO().Set("va_bp_worn".GetStableHashCode(), hash);
+            return true;
+        }
         public const string CUSTOM_DATA_KEY = "BackpackInventory";
 
         /// <summary>
@@ -180,5 +281,33 @@ namespace VerdantsAscent.Managers
         /// or behavior gates.
         /// </summary>
         public static bool IsSlotBasedStorageActive => !BackpackManager.LegacyMode;
+
+        // ── Special slots (1.0.20) ───────────────────────────────────
+        // Upgraded bags (quality 2+) carry a rail of special slots right of the grid. Each slot holds one stack outside
+        // the grid and outside the player inventory; ReadSpecialSlot returns the stored ItemData itself (never a copy).
+
+        public const string SlotTool = BackpackSpecialSlots.SlotTool;
+        public const string SlotResources = BackpackSpecialSlots.SlotResources;
+        public const string SlotBypass = BackpackSpecialSlots.SlotBypass;
+
+        /// <summary>Every slot kind, in rail order (top-down).</summary>
+        public static readonly string[] SpecialSlotKinds = { SlotTool, SlotResources, SlotBypass };
+
+        /// <summary>The bag's special slots in rail order; empty below quality 2.</summary>
+        public static string[] GetSpecialSlots(ItemDrop.ItemData bag) => BackpackSpecialSlots.GetSpecialSlots(bag);
+
+        /// <summary>The item in that slot, or null.</summary>
+        public static ItemDrop.ItemData ReadSpecialSlot(ItemDrop.ItemData bag, string kind) => BackpackSpecialSlots.Read(bag, kind);
+
+        /// <summary>Puts <paramref name="item"/> in the slot (null clears it). False when the slot doesn't take it.</summary>
+        public static bool WriteSpecialSlot(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData item) => BackpackSpecialSlots.Write(bag, kind, item);
+
+        public static bool SpecialSlotAccepts(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData item) => BackpackSpecialSlots.Accepts(bag, kind, item);
+
+        /// <summary>Bumped on every special-slot change.</summary>
+        public static int SpecialSlotsVersion => BackpackSpecialSlots.Version;
+
+        /// <summary>The slot's white-on-transparent icon (tint it with the slot colour), or null for an unknown kind.</summary>
+        public static Sprite GetSlotIcon(string kind) => BackpackSpecialSlots.GetIcon(kind);
     }
 }
