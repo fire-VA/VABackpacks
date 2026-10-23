@@ -1,4 +1,4 @@
-## 1.0.94
+## 1.0.95
 - Staff attack styles (off by default): each early magic staff gets its own primary attack and a secondary attack.
 - Placed staff attacks show a ring on the ground first; aim it and left click to cast, right click to cancel.
 - Homing staff bolts lock onto the enemy closest to your crosshair.

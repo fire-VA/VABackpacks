@@ -21,7 +21,7 @@ namespace VerdantsAscent
         public static readonly Harmony harmony = new Harmony("com.Fire.VA_Backpacks");
         public const string PluginGUID = "com.Fire.VA_Backpacks";
         public const string PluginName = "VABackpacks";
-        public const string PluginVersion = "1.0.94";
+        public const string PluginVersion = "1.0.95";
         // ConfigSync's floor is a FIXED constant -
         // raise it only when a synced key's name, type or meaning changes (the current synced set: Rows/Columns etc.).
         public const string SyncMinimumVersion = "1.0.52";
