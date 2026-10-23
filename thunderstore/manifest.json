@@ -5,6 +5,6 @@
     "description":  "Real backpacks with storage that travels with the bag: five bags, workbench upgrades with tool, resources and teleport bypass slots, and bags that unpack into camps.",
     "dependencies":  [
                          "denikson-BepInExPack_Valheim-5.4.2350",
-                         "VerdantsAscent-FiresUnifiedCore-0.2.670"
+                         "VerdantsAscent-FiresUnifiedCore-0.2.752"
                      ]
 }

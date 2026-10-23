@@ -62,6 +62,8 @@ The project in `VABackpacks/` targets .NET Framework 4.8. Point the references a
 (`valheim_Data/Managed`, with a publicized `assembly_valheim`), BepInEx, Harmony and a FiresUnifiedCore build,
 then build in Release.
 
+The asset bundle `vabackpacks` (about 80 MB) is not stored in this repository. Build it from the mod's Unity project (AssetBundle build, Standalone Windows) or copy it out of a released VABackpacks download, and place it next to the built `VABackpacks.dll` in the plugin folder (the mod loads it from there at runtime).
+
 ## Issues / questions
 
 https://discord.gg/zQRgHbqms4

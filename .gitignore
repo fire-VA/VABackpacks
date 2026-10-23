@@ -53,3 +53,6 @@ Thumbs.db
 desktop.ini
 # Local backups from doc cleanups
 *.pre_cleanup_*
+
+# the ~80 MB asset bundle: shipped in release downloads, not stored in the repo
+**/plugins/VABackpacks/vabackpacks

@@ -34,7 +34,7 @@ Rules: no bag inside a bag, and a bag can't be quick-moved into itself.
 ## Requires
 
 - BepInExPack for Valheim
-- FiresUnifiedCore 0.2.389 or newer
+- FiresUnifiedCore 0.2.752 or newer
 - VAInventory (optional) - shows each worn bag's grid inside the inventory panel.
 - FiresGuilds (optional) - guildmates can use your camp chest.
 
