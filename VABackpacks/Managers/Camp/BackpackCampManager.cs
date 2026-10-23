@@ -786,7 +786,7 @@ namespace VerdantsAscent.Managers.Camp
             float terrainRadius = chestRadius + minSep + 4f;
             // ONE save radius, the
             // camp level's, for pieces, plants, terrain capture, the pre-camp snapshot and the restore. The camp workbench shows it.
-            // Capped at FAT 0.2.863's 48 m capture limit.
+            // Capped at FAT's 48 m capture limit (FAT 0.2.863+).
             // The capture covers FAT's
             // LevelReach (radius + skirt, read BEFORE the level) + a per-piece pad's 1.5 m + its own 1.5 m skirt, so pack-up puts the
             // skirt back too. Older FAT (no LevelReach): terrainRadius as before.
@@ -802,7 +802,7 @@ namespace VerdantsAscent.Managers.Camp
                 try
                 {
                     // On voxel ground the heightmap snapshot below cannot put the site back, so FAT takes one too.
-                    // FAT 0.2.945's absolute capture BEFORE anything is written; the older relative capture stays for an older FAT
+                    // FAT's absolute capture (FAT 0.2.945+) BEFORE anything is written; the older relative capture stays for an older FAT
                     st.PreCamp = CampTerrainCarry.CapturePreCamp(campCenter, saveRadius) ?? string.Empty;
                     st.GroundBefore = CampTerrainCarry.Capture(campCenter, CampLayout.YawOf(forward), saveRadius) ?? string.Empty;
                     // On a voxel world the voxel field IS the drawn ground; TerrainComp height does not show, and
@@ -2154,7 +2154,7 @@ namespace VerdantsAscent.Managers.Camp
             foreach (var c in root.GetComponentsInChildren<ZSyncTransform>(true)) kill(c);
             foreach (var c in root.GetComponentsInChildren<ItemDrop>(true))         kill(c);
             foreach (var c in root.GetComponentsInChildren<ZNetView>(true))         kill(c);
-            // Joints before their Rigidbodies (R76/R77: "Can't remove Rigidbody because ConfigurableJoint depends on it"):
+            // Joints before their Rigidbodies (else "Can't remove Rigidbody because ConfigurableJoint depends on it"):
             // the HoboStick's AttachPoint carries a ConfigurableJoint (HoboStickPhysicsSetup), and Unity refuses to remove
             // a Rigidbody a joint still needs, so the decoration kept its physics body.
             foreach (var c in root.GetComponentsInChildren<Joint>(true))            kill(c);
@@ -2722,7 +2722,7 @@ namespace VerdantsAscent.Managers.Camp
             // m_spawnPoint Transform is gone too — but if any code path
             // queries the bed before it's torn down (or a half-stripped
             // copy lingers because of immortality flags), IsCurrent NREs.
-            // World load then fails with the trace the user reported.
+            // World load then fails with an NRE.
             //
             // Strategy: snapshot the bed's spawn-point position now,
             // then call Game.RemoveCustomSpawnPoint(point) — vanilla
