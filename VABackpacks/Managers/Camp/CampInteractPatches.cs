@@ -6,7 +6,7 @@
 //   3. Container.Awake        → re-attach the BackpackCampMarker when a
 //      camp chest loads from a saved ZDO (chunk-reload path).
 //
-// The actual gesture detection lives in BackpackCampManager.Update()
+// The actual gesture detection lives in BackpackCampManager.Update
 // which polls Input.GetKey(KeyCode.C) + Shift and uses a camera raycast
 // to resolve the hovered target. That avoids fighting vanilla's
 // pickup-on-E and open-chest-on-E logic — Shift+C has no vanilla
@@ -37,12 +37,12 @@ namespace VerdantsAscent.Managers.Camp
             if (!BackpackApi.IsBackpack(__instance.m_itemData)) return;
 
             float dur = ConfigManager.Instance.configCampHoldDuration.Value;
-            __result += $"\n[<color=yellow><b>Hold $KEY_Use</b></color>] Deploy camp ({dur:F0}s)";   // 1.0.19 (Fire 10-07)
+            __result += $"\n[<color=yellow><b>Hold $KEY_Use</b></color>] Deploy camp ({dur:F0}s)";
             __result = Localization.instance != null ? Localization.instance.Localize(__result) : __result;
         }
 
         /// <summary>
-        /// 1.0.19 (Fire 10-07: hold E deploys the camp, tap E picks up): the first Use press on a dropped backpack is held back
+        /// The first Use press on a dropped backpack is held back
         /// and handed to BackpackCampManager, which picks it up on release or deploys the camp after the hold time.
         /// </summary>
         [HarmonyPatch(typeof(ItemDrop), nameof(ItemDrop.Interact))]

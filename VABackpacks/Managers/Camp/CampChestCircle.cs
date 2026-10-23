@@ -1,5 +1,5 @@
-// CampChestCircle - 1.0.41 (Fire's camp redesign: "the white build circle shown when the hammer is out at a camp is CENTRED
-// ON THE CHEST, with radius = the camp's save radius"). The camp chest is the camp centre; this draws vanilla's own build-area
+// CampChestCircle - the white build circle shown when the hammer is out at a camp is centred
+// on the chest, with radius = the camp's save radius. The camp chest is the camp centre; this draws vanilla's own build-area
 // circle (a copy of the workbench's area marker) around it, sized to the ring pack-up saves, while the local player has the
 // hammer out near the camp. The camp workbench keeps its vanilla circle and range and anchors nothing.
 
@@ -18,7 +18,7 @@ namespace VerdantsAscent.Managers.Camp
 
         void Awake() => marker = GetComponent<BackpackCampMarker>();
 
-        // 1.0.41: the one ring definition pack-up uses too (CampRing).
+        // The one ring definition pack-up uses too (CampRing).
         float Radius => marker == null ? 0f : CampRing.Radius(marker);
 
         void Update()
@@ -33,7 +33,7 @@ namespace VerdantsAscent.Managers.Camp
             {
                 circle.transform.position = CampRing.Centre(marker);
                 if (projector != null && !Mathf.Approximately(projector.m_radius, Radius)) projector.m_radius = Radius;
-                Tint();   // 1.0.45: cheap now (a child-count compare until segments change)
+                Tint();   // Cheap now (a child-count compare until segments change)
             }
         }
 
@@ -57,7 +57,7 @@ namespace VerdantsAscent.Managers.Camp
             return true;
         }
 
-        // 1.0.42 (Fire: "make the camp save ring GREEN so it stands out"): vanilla's circle, its segment renderers tinted green.
+        // Vanilla's circle, its segment renderers tinted green.
         // The projector adds segments as the radius grows, so the tint is re-applied when the renderer count changes.
         static readonly Color Green = new Color(0.25f, 1f, 0.35f, 1f);
         int tinted = -1, tintedChildren = -1;
@@ -65,7 +65,7 @@ namespace VerdantsAscent.Managers.Camp
 
         void Tint()
         {
-            // 1.0.45 ([lead]): the renderers are looked up again only when the projector's segment count changes.
+            // The renderers are looked up again only when the projector's segment count changes.
             int children = circle.transform.childCount;
             if (children == tintedChildren) return;
             tintedChildren = children;
@@ -93,7 +93,7 @@ namespace VerdantsAscent.Managers.Camp
 
 namespace VerdantsAscent.Managers.Camp
 {
-    // 1.0.42 (Fire: "show ONLY the chest ring"): the camp's own workbench never draws its vanilla build-range circle, so
+    // The camp's own workbench never draws its vanilla build-range circle, so
     // the green save ring around the chest is the only ring at a camp. Its build range is untouched.
     [HarmonyLib.HarmonyPatch(typeof(CraftingStation), nameof(CraftingStation.ShowAreaMarker))]
     internal static class CampWorkbenchMarkerHide

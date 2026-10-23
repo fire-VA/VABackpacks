@@ -1,4 +1,4 @@
-// CampCapture — 1.0.29 (Fire 10-08, camp upgrades plan step 2): pack-up takes the player's OWN pieces inside the camp
+// CampCapture — pack-up takes the player's OWN pieces inside the camp
 // level's radius into the bag (m_customData["VA_CampBlueprint"]), and the next deploy places them again around the camp.
 //
 // Rules (Tools\VABACKPACKS_CAMP_UPGRADES_PLAN.md sections 3, 6):
@@ -22,7 +22,7 @@ namespace VerdantsAscent.Managers.Camp
     internal static class CampCapture
     {
         internal const string CustomDataKey = "VA_CampBlueprint";
-        private const byte FormatVersion = 3;   // 1.0.39: + plant growth (elapsed ticks); 1.0.35 v2: camp frame; v1: world axes
+        private const byte FormatVersion = 3;   // + plant growth (elapsed ticks); v2: camp frame; v1: world axes
         private const int MaxBytes = 256 * 1024;
 
         private sealed class Packed
@@ -31,14 +31,14 @@ namespace VerdantsAscent.Managers.Camp
             internal Vector3 Offset;
             internal Quaternion Rotation;
             internal string Data;
-            internal long Elapsed;     // 1.0.39: a plant's growing time so far (ticks); 0 for anything else
+            internal long Elapsed;     // A plant's growing time so far (ticks); 0 for anything else
         }
 
-        // ── 1.0.44: the one piece count ─────────────────────────────────────────────────────────────────────────────────
+        // ── The one piece count ─────────────────────────────────────────────────────────────────────────────────
 
         internal sealed class CollectStats
         {
-            internal int Foreign, Unowned, Warded, FullChests, Crops, SkippedTotal;
+            internal int Foreign, Unowned, Warded, FullChests, Crops, SkippedTotal, InRing, Adopted;   // + InRing, Adopted (no-builder pieces taken)
             internal readonly List<string> Skipped = new List<string>();
             internal ZDOID OpenChest = ZDOID.None;
         }
@@ -47,13 +47,21 @@ namespace VerdantsAscent.Managers.Camp
         /// The player's own pieces (plants included) and grown crops inside the ring: what pack-up takes and what counts
         /// against the bag's cap. Used by pack-up and by the camp HUD counter, so the two never disagree.
         /// </summary>
+        private static bool s_logSkips;   // Per-piece skip lines only during a real pack-up, never from the HUD counter
         internal static List<Component> Collect(Player player, Vector3 center, float radius, CollectStats st)
         {
             var found = new List<Component>();
             if (player == null) return found;
             long me = player.GetPlayerID();
             var seen = new HashSet<ZDOID>();
-            void Skip(Component c, string why) { st.SkippedTotal++; if (st.Skipped.Count < 10) st.Skipped.Add($"{Utils.GetPrefabName(c.gameObject)} ({why})"); }
+            void Skip(Component c, string why)
+            {
+                st.SkippedTotal++;
+                if (st.Skipped.Count < 10) st.Skipped.Add($"{Utils.GetPrefabName(c.gameObject)} ({why})");
+                // EVERY skipped piece is logged with its reason and distance
+                if (s_logSkips) CampLog.LogDebug($"camp pack-up: left behind {Utils.GetPrefabName(c.gameObject)} at {Vector3.Distance(c.transform.position, center):0.0} m: {why}");
+            }
+            st.InRing = 0;
             var inRadius = new List<Piece>();
             // Searched wider, then kept when any part of the piece reaches inside the ring (a long wall straddling the edge counts).
             Piece.GetAllPiecesInRadius(center, radius + 16f, inRadius);
@@ -65,21 +73,31 @@ namespace VerdantsAscent.Managers.Camp
                 ZNetView nview = piece.GetComponent<ZNetView>();
                 if (nview == null || !nview.IsValid() || !seen.Add(nview.GetZDO().m_uid)) continue;
                 if (nview.GetZDO().GetInt(CampImmortalPatch.KEY_IMMORTAL, 0) == 1) continue;   // the camp's own pieces travel in its layout
-                if (piece.GetCreator() != me) { if (piece.GetCreator() != 0) { st.Foreign++; Skip(piece, "another player built it"); } else { st.Unowned++; Skip(piece, "no builder"); } continue; }
-                // 1.0.39: own plants (cultivator-placed) are packed with their growth
+                st.InRing++;
+                // A piece with NO builder (creator 0: placed by a blueprint / hammer tool / spawn command)
+                // is the player's to pack when it is removable (Piece.m_canBeRemoved, which world ruins are not), not part of a world
+                // location, and the ward check below passes. Pieces another player built still stay.
+                if (piece.GetCreator() != me)
+                {
+                    if (piece.GetCreator() != 0) { st.Foreign++; Skip(piece, "another player built it"); continue; }
+                    if (!piece.m_canBeRemoved) { st.Unowned++; Skip(piece, "no builder and not removable (world piece)"); continue; }
+                    if (piece.GetComponentInParent<Location>() != null) { st.Unowned++; Skip(piece, "no builder, part of a world location"); continue; }
+                    st.Adopted++;
+                }
+                // Own plants (cultivator-placed) are packed with their growth
                 if (piece.GetComponent<Ship>() || piece.GetComponent<Vagon>() || piece.GetComponent<TombStone>()) { Skip(piece, "ship, cart or tombstone"); continue; }
                 if (!PrivateArea.CheckAccess(p, 0f, false, false)) { st.Warded++; Skip(piece, "inside a ward you cannot use"); continue; }
                 Container chest = piece.GetComponentInChildren<Container>();
                 if (chest != null)
                 {
                     if (chest.IsInUse() && st.OpenChest == ZDOID.None) st.OpenChest = nview.GetZDO().m_uid;
-                    if (chest.GetInventory() != null && chest.GetInventory().NrOfItems() > 0) st.FullChests++;   // 1.0.32: packed, contents weigh (CampStorage)
+                    if (chest.GetInventory() != null && chest.GetInventory().NrOfItems() > 0) st.FullChests++;   // Packed, contents weigh (CampStorage)
                 }
                 found.Add(piece);
             }
-            // 1.0.39 (plan step 4): grown crops standing on cultivated soil in the radius, ready to harvest. They carry no builder
+            // Grown crops standing on cultivated soil in the radius, ready to harvest. They carry no builder
             // (vanilla grows them from the player's plant), so the soil and the ward decide.
-            // 1.0.45 (Fire: fps dips at his camp): crops are found by a physics query around the ring, not a scan of every
+            // Crops are found by a physics query around the ring, not a scan of every
             // Pickable in the scene.
             var picks = new HashSet<Pickable>();
             foreach (Collider col in Physics.OverlapSphere(center, radius + 2f, ~0, QueryTriggerInteraction.Collide))
@@ -119,7 +137,7 @@ namespace VerdantsAscent.Managers.Camp
 
         internal static int MaxEncodedChars => MaxBytes * 4 / 3 + 4;
 
-        /// <summary>1.0.44: from the last capture, the pieces in the ring and how many a partial pack left standing.</summary>
+        /// <summary>From the last capture, the pieces in the ring and how many a partial pack left standing.</summary>
         internal static int LastInRing, LastLeftBehind;
         static readonly BepInEx.Logging.ManualLogSource CampLog = BepInEx.Logging.Logger.CreateLogSource("VABackpacks.CampCapture");
 
@@ -135,13 +153,15 @@ namespace VerdantsAscent.Managers.Camp
             line = null;
             storage = new CampStorage.Totals();
             if (player == null || ZNetScene.instance == null || !CampLevels.CustomCamps) return null;
-            // 1.0.41: centre and radius come from CampRing (the same circle the chest ring draws).
+            // Centre and radius come from CampRing (the same circle the chest ring draws).
             int cap = CampLevels.PieceCap(level);
             long me = player.GetPlayerID();
 
-            // 1. Read only (1.0.44: the shared Collect, the same count the camp HUD counter shows).
+            // 1. Read only (the shared Collect, the same count the camp HUD counter shows).
             var st = new CollectStats();
-            var found = Collect(player, center, radius, st);
+            s_logSkips = !checkOnly;
+            List<Component> found;
+            try { found = Collect(player, center, radius, st); } finally { s_logSkips = false; }
             int foreign = st.Foreign, unowned = st.Unowned, warded = st.Warded, fullChests = st.FullChests, crops = st.Crops;
             int skippedTotal = st.SkippedTotal;
             var skipped = st.Skipped;
@@ -156,7 +176,7 @@ namespace VerdantsAscent.Managers.Camp
                 line = $"camp pack-up: 0 pieces, level {level}, {radius:0} m ({foreign} foreign, {unowned} with no builder, {warded} warded)" + (skippedTotal > 0 ? $"; skipped {skippedTotal}: {string.Join(", ", skipped)}{(skippedTotal > skipped.Count ? ", ..." : "")}" : "");
                 return null;
             }
-            // 1.0.44 (Fire: over the cap, ask, and on Yes pack up to the cap and leave the rest standing): the camp's own
+            // The camp's own
             // deploy pieces first, then the nearest to the chest, so what stays behind is the outer part.
             LastInRing = found.Count;
             LastLeftBehind = 0;
@@ -184,17 +204,17 @@ namespace VerdantsAscent.Managers.Camp
                 packed.Add(new Packed
                 {
                     Prefab = Utils.GetPrefabName(piece.gameObject),
-                    // 1.0.35: in the camp's frame, so the next deploy turns the whole layout to its own facing.
+                    // In the camp's frame, so the next deploy turns the whole layout to its own facing.
                     Offset = Quaternion.Inverse(CampLayout.Facing(campYaw)) * (piece.transform.position - center),
                     Rotation = Quaternion.Inverse(CampLayout.Facing(campYaw)) * piece.transform.rotation,
                     Data = ReadData(zdo.m_uid),
-                    // 1.0.39: growth is kept as the time grown so far, so the plant does not age while it is packed.
+                    // Growth is kept as the time grown so far, so the plant does not age while it is packed.
                     Elapsed = piece.GetComponent<Plant>() != null ? Math.Max(0L, now - zdo.GetLong(ZDOVars.s_plantTime, now)) : 0L,
                 });
                 if (piece.GetComponent<Plant>() != null) plants++;
             }
             string trial = Encode(packed);
-            // 1.0.44: a partial pack drops the farthest pieces until the blueprint fits.
+            // A partial pack drops the farthest pieces until the blueprint fits.
             while (partial && trial != null && trial.Length > MaxBytes * 4 / 3 + 4 && packed.Count > 1)
             {
                 int drop = Math.Max(1, packed.Count / 10);
@@ -210,7 +230,7 @@ namespace VerdantsAscent.Managers.Camp
                 return null;
             }
 
-            // 1.0.44 (Fire: a refused pack-up still took the camp down and left his building standing): a check-only call stops here,
+            // A check-only call stops here,
             // before anything is removed, so pack-up can refuse with the camp untouched.
             if (checkOnly) { line = $"camp pack-up check: {found.Count} pieces, cap {cap}: ok"; return string.Empty; }
             LastLeftBehind = leftBehind.Count;
@@ -243,13 +263,16 @@ namespace VerdantsAscent.Managers.Camp
                     taken.Add(packed[i]);
                     if (before != null) { storage.Items += before.Items; storage.Weight += before.Weight; storage.NoTeleport |= before.NoTeleport; }
                 }
-                else stayed++;
+                else { stayed++; CampLog.LogDebug($"camp pack-up: left behind {Utils.GetPrefabName(piece.gameObject)} {id}: the destroy did not commit (not owner?)"); }
             }
             string blueprint = taken.Count > 0 ? Encode(taken) : null;
             line = $"camp pack-up: {taken.Count} pieces ({plants} growing plants, {crops} grown crops), {stayed} refused, level {level}, {radius:0} m, {blueprint?.Length ?? 0} chars, " +
                    $"{fullChests} chests holding {storage.Items} items weigh {storage.Weight:0.##}{(storage.NoTeleport ? ", blocks portals" : "")} " +
                    $"({foreign} foreign, {unowned} with no builder, {warded} warded)" + (skippedTotal > 0 ? $"; skipped {skippedTotal}: {string.Join(", ", skipped)}{(skippedTotal > skipped.Count ? ", ..." : "")}" : "");
             if (taken.Count == 0) storage = new CampStorage.Totals();
+            // The counts in one line, always at Info: found in the ring / captured / removed / left behind (reasons above)
+            CampLog.LogInfo($"camp pack-up counts: {st.InRing} build piece(s) in the ring (+{crops} crops), {found.Count} to capture ({st.Adopted} with no builder), {taken.Count} captured + removed, " +
+                $"{stayed} not removed, {leftBehind.Count} over the cap/data limit, {skippedTotal} skipped ({foreign} foreign, {unowned} world/no-builder, {warded} warded)");
             return blueprint;
         }
 
@@ -380,7 +403,7 @@ namespace VerdantsAscent.Managers.Camp
                 GameObject go = UnityEngine.Object.Instantiate(prefab, center + facing * p.Offset, facing * p.Rotation);
                 spawned.Add(go);
                 if (!string.IsNullOrEmpty(p.Data) && !applyData(go, p.Data)) dataFailed++;
-                // 1.0.39: a plant carries on from the growth it had when packed.
+                // A plant carries on from the growth it had when packed.
                 if (p.Elapsed > 0 && ZNet.instance != null)
                 {
                     var nv = go.GetComponent<ZNetView>();

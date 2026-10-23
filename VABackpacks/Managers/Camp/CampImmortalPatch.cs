@@ -1,7 +1,7 @@
 // CampImmortalPatch — make every spawned camp piece invulnerable to
 // damage so the camp can't be griefed (other players, mobs, fire,
 // fall, etc.). Pieces still come down via our own pack-up flow which
-// uses ZNetView.Destroy(), bypassing WearNTear entirely.
+// uses ZNetView.Destroy, bypassing WearNTear entirely.
 //
 // Approach:
 //   1. At deploy time, tag each spawned piece's ZDO with KEY_IMMORTAL.
@@ -10,7 +10,7 @@
 //      when the tag is present. No damage is recorded, no health drops.
 //
 // The wood pile carries this same tag, but its E-interact handler
-// (BackpackCampWoodPile.Interact → ZNetView.Destroy() when empty)
+// (BackpackCampWoodPile.Interact → ZNetView.Destroy when empty)
 // doesn't go through ApplyDamage, so taking wood and emptying-the-pile
 // still works. Damage from axes / mobs is blocked.
 
@@ -80,7 +80,7 @@ namespace VerdantsAscent.Managers.Camp
             return !IsImmortal(__instance);   // skip vanilla when immortal
         }
 
-        // 1.0.35 (Fire: remove and move camp pieces with the hammer while decorating): a camp's own piece came with the bag,
+        // A camp's own piece came with the bag,
         // not from the player's materials, so removing it gives nothing back (else deploy, remove, pack, repeat farms wood
         // and stone). Removal itself is vanilla's; the pack-up records what is left.
         [HarmonyPatch(typeof(Piece), nameof(Piece.DropResources))]

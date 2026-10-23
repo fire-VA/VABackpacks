@@ -147,6 +147,8 @@
     <Compile Include="Managers\BackpackManager.cs" />
     <Compile Include="Managers\BackpackSlotRail.cs" />
     <Compile Include="Managers\BackpackSpecialSlots.cs" />
+    <Compile Include="Managers\BackpackSettingsPatches.cs" />
+    <Compile Include="Managers\Camp\ServerCampGate.cs" />
     <Compile Include="Managers\BackpackWornVisual.cs" />
     <Compile Include="Managers\Camp\BackpackCampManager.cs" />
     <Compile Include="Managers\Camp\CampGround.cs" />

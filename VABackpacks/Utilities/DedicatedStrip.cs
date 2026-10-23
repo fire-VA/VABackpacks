@@ -6,7 +6,7 @@ using UnityEngine.Profiling;
 namespace VerdantsAscent.Utilities
 {
     /// <summary>
-    /// 1.0.76 ([wishbone], [fgn]'s Tools\DEDI_CLIENT_ONLY_AUDIT.md row 15 / MEMORY_LEADS M5): on a HEADLESS server (batch mode, no graphics
+    /// On a HEADLESS server (batch mode, no graphics
     /// device) the bags' bundle still has to load, because ItemDrop / ObjectDB / ZNetScene need the prefabs, but nothing there is ever
     /// drawn. After the load, this drops the render-only data from VABackpacks' own item and piece prefabs: MeshFilter and skinned meshes
     /// (BackpackROtateTest2 26 MB, Rope, ...) and the renderers' materials (the 2048^2 albedo / normal maps). Meshes a MeshCollider also

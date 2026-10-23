@@ -52,7 +52,7 @@ namespace VerdantsAscent.Managers
                 LoadSingleItem(prefabPath, itemName, ref failed);
             }
 
-            // 1.0.56: the early magic staffs (EarlyMagic), always registered so owned ones load; recipes follow [Early Magic] Enabled
+            // The early magic staffs (EarlyMagic), always registered so owned ones load; recipes follow [Early Magic] Enabled
             foreach (var itemName in EarlyMagic.StaffPrefabs)
                 LoadSingleItem(mainPath + "backpacks/" + itemName + ".prefab", itemName, ref failed);
 

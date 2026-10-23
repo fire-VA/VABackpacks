@@ -64,7 +64,7 @@ namespace VerdantsAscent.Managers.Camp
             if (!BackpackManager.IsSlamDeployBackpack(prefabName)) return false;
 
             if (!Input.GetMouseButtonDown(2)) return false;       // MMB
-            if (BackpackManager.IsFiresInputCaptured()) return false;   // 1.0.43: not while a text field has input
+            if (BackpackManager.IsFiresInputCaptured()) return false;   // Not while a text field has input
             if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 return false;                                     // Shift+MMB has other meanings
 

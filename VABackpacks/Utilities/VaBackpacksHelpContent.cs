@@ -34,7 +34,7 @@ namespace VerdantsAscent.Utilities
             w.Paragraph("Real backpacks with real storage: the Small Bag, Day Bag, and Explorer " +
                 "Bag wear on your shoulder, and the Hobo Stick and Fires Wizard's Staff carry " +
                 "their load in hand. Craft them at the workbench, or find one in chests: the Small Bag " +
-                "in the Meadows, the Day Bag in the Black Forest, the Explorer Bag in the Swamp.");
+                "in the Meadows, the Day Bag in the Black Forest, the Explorer Bag in the Swamp and the Mountains.");
             w.Divider();
 
             w.SubHeader("Using a Bag");
@@ -109,8 +109,7 @@ namespace VerdantsAscent.Utilities
             w.Bullet("ColdResistance / WetResistance / FeatherFall / StrengthBonus — perks");
             w.Bullet("CampBlueprint (+YOffset) — a PlanBuild blueprint replaces the procedural " +
                 "camp layout for this bag");
-            w.Bullet("SpeedModifier and Teleportable are bound but not yet implemented — " +
-                "changing them does nothing in this build.");
+            w.Bullet("SpeedModifier changes your speed while the bag is worn; Teleportable = off stops portals while the bag holds anything.");
             w.AdminDivider();
 
             w.SubHeader("Camp (Backpacks.Camp)");

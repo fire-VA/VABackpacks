@@ -1,4 +1,4 @@
-// CampLayout - 1.0.35 (Fire's hand test 10-08: a re-deploy put the chest on the log pile and the bedroll over the fire).
+// CampLayout - keeps a re-deploy from putting the chest on the log pile or the bedroll over the fire.
 // The camp's own pieces (fire, workbench, chest, bed, wood pile, chair, cooking station) were placed fresh every deploy
 // by random offsets, while the player's captured pieces came back at fixed offsets, so they collided. Pack-up now saves
 // where each camp piece stood, as an offset and a yaw in the CAMP's frame (centre + facing), and the next deploy puts
@@ -28,7 +28,7 @@ namespace VerdantsAscent.Managers.Camp
         internal static float YawOf(Vector3 forward)
         {
             forward.y = 0f;
-            // 1.0.41 (Fire): the camp chest always faces north, so a camp is never turned: every offset is world-axis from
+            // The camp chest always faces north, so a camp is never turned: every offset is world-axis from
             // the chest. Kept as a function so the callers stay one place to change.
             return 0f;
         }

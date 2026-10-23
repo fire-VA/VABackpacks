@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace VerdantsAscent.Managers
 {
-    // 1.0.63 ([fgn] via the lead 10-14: a bag looted from a chest never glowed): chest bags come from the chest's vanilla DropTable
+    // Chest bags come from the chest's vanilla DropTable
     // (Container.AddDefaultItems), so neither this mod nor FLO touched the item and it never got a rarity. When the key is on and
     // Fires Loot Overhaul is loaded, each of our bags in a freshly filled chest goes through FloApi.Roll(item, -1 = random, tier,
     // biome, 1) by reflection. Tier: 1 Meadows/BlackForest, 2 Swamp/Mountain/Plains, 3 later. Default OFF (new behaviour).

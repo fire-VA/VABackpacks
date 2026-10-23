@@ -1,4 +1,4 @@
-// CampStorage — 1.0.32 (Fire 10-08, camp upgrades plan step 3, section 4): chests with items are packed with the camp, and
+// CampStorage — chests with items are packed with the camp, and
 // their items weigh on the bag at a share of their normal weight by category ([CampStorage], server-synced). Anything
 // non-teleportable in a packed camp blocks portals, like ore in a bag cell. Worked out once at pack-up and kept on the bag
 // (m_customData VA_CampWeight / VA_CampItems / VA_CampNoTeleport), so neither the weight nor the portal check unpacks the

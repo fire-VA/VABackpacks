@@ -1,5 +1,5 @@
-// WornBagGuard - 1.0.33 (Fire 10-08, round 33: "If you removed everything from the player and then that backpack showed up,
-// that's an actual problem."). A worn bag is tracked outside the inventory (the coexistence dict, so a cape can share the
+// WornBagGuard - a bag removed from the player must not show up again.
+// A worn bag is tracked outside the inventory (the coexistence dict, so a cape can share the
 // shoulder) and a weapon-slot bag sits in m_rightItem. When the bag item leaves the player's inventory by a path that never
 // unequips it (Inventory.RemoveItem / RemoveAll by a mod or a test, a destroy), the tracking, the "va_bp_worn" ZDO key and the
 // worn visual stayed: a ghost bag. After every change of a player's inventory, any equipped bag that is no longer in it is

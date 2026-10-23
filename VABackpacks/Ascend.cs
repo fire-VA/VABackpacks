@@ -21,9 +21,9 @@ namespace VerdantsAscent
         public static readonly Harmony harmony = new Harmony("com.Fire.VA_Backpacks");
         public const string PluginGUID = "com.Fire.VA_Backpacks";
         public const string PluginName = "VABackpacks";
-        public const string PluginVersion = "1.0.78";
-        // 1.0.53 ([release] 10-13 pin, carried from the main tree into the real source): ConfigSync's floor is a FIXED constant -
-        // raise it only when a synced key's name, type or meaning changes (1.0.52 is the current synced set: Rows/Columns etc.).
+        public const string PluginVersion = "1.0.94";
+        // ConfigSync's floor is a FIXED constant -
+        // raise it only when a synced key's name, type or meaning changes (the current synced set: Rows/Columns etc.).
         public const string SyncMinimumVersion = "1.0.52";
 
         public static AssetBundle assetBundle;
@@ -55,14 +55,14 @@ namespace VerdantsAscent
             this.configSync.lockedConfigChanged += ConfigManager.Instance.OnConfigLockChanged;
 
             ConfigManager.Instance.Initialize(Config);
-            BackpackCraftingAndLoot.Bind(Config, configSync); EarlyMagic.Bind(Config, configSync); StaffProjectiles.Bind(Config, configSync); StaffAttackStyles.Bind(Config, configSync); ChestBagRarity.Bind(Config, configSync);   // 1.0.56, 1.0.60, 1.0.63
-            VerdantsAscent.Managers.Camp.CampLevels.Bind(Config, configSync); VerdantsAscent.Managers.Camp.CampStorage.Bind(Config, configSync);   // 1.0.18: recipes + chest loot, server-synced
+            BackpackCraftingAndLoot.Bind(Config, configSync); EarlyMagic.Bind(Config, configSync); StaffProjectiles.Bind(Config, configSync); StaffAttackStyles.Bind(Config, configSync); ChestBagRarity.Bind(Config, configSync);
+            VerdantsAscent.Managers.Camp.CampLevels.Bind(Config, configSync); VerdantsAscent.Managers.Camp.CampStorage.Bind(Config, configSync);   // Recipes + chest loot, server-synced
 
             BindConfigsToSync();
 
             // Shared help panel (FiresCore) — SOFT dependency; no-ops when Core is absent.
             VerdantsAscent.Utilities.VaBackpacksHelpContent.TryRegister();
-            // 1.0.75: the hub Stats tab card (Core 0.2.511+). Wrapped HERE too: with no Core at all, the card class's own type load
+            // The hub Stats tab card (Core 0.2.511+). Wrapped HERE too: with no Core at all, the card class's own type load
             // (its StatRow field) throws before its try/catch can run, and that must not stop the rest of Awake (the 0.1.141 lesson).
             try { VerdantsAscent.Managers.BackpackStatsSection.Register(); }
             catch (System.Exception e) { UnityEngine.Debug.Log("[VABackpacks] stats: card not registered (" + e.GetBaseException().GetType().Name + ")"); }
@@ -168,7 +168,7 @@ namespace VerdantsAscent
                 VAPieceManager.LoadPieces("Assets/Custom/VAitems/", PluginName);
 
                 Debug.Log($"{PluginName}: Loaded {itemPrefabs.Count} items, {piecePrefabs.Count} pieces");
-                // 1.0.76 ([fgn]'s dedi audit): a headless server drops the bags' render-only meshes / materials (a no-op elsewhere)
+                // A headless server drops the bags' render-only meshes / materials (a no-op elsewhere)
                 try { VerdantsAscent.Utilities.DedicatedStrip.Run(itemPrefabs.Concat(piecePrefabs), PluginName); }
                 catch (Exception e) { Debug.LogWarning($"{PluginName}: dedicated strip failed (render data kept): {e.Message}"); }
             }
@@ -178,7 +178,7 @@ namespace VerdantsAscent
             }
         }
 
-        // 1.0.25 (Tools\VABACKPACKS_PERF.md, option A): the bags' bundle ships as its own LZ4 (chunk-compressed) file next to the
+        // The bags' bundle ships as its own LZ4 (chunk-compressed) file next to the
         // DLL and is read with LoadFromFile, so Unity reads it in pieces on demand. The LZMA bundle that used to sit inside the DLL
         // had to be unpacked whole: about 290 MB of RAM held all session. The bundle also carries the decimated bag meshes and
         // leaves out unused prefabs (options B and C). The embedded-resource path stays only as a fallback for a rebuilt DLL.
@@ -271,8 +271,8 @@ namespace VerdantsAscent
             FixProjectileAttacks();
         }
 
-        // 1.0.52 (R-1013K: 218x "The Object you want to instantiate is null ... Attack.FireProjectileBurst" on every Wizard Staff
-        // swing, 0 damage): the staff's bundle prefab has a Projectile attack with no projectile. Each of our items whose
+        // Without this, every Wizard Staff swing logged "The Object you want to instantiate is null" in Attack.FireProjectileBurst
+        // and did 0 damage: the staff's bundle prefab has a Projectile attack with no projectile. Each of our items whose
         // projectile attack lacks one takes vanilla's own (StaffFireball for the staff); every ItemData shares m_shared, so items
         // already held are fixed too. Runs on each ObjectDB build; a WARNING names what could not be resolved.
         private static readonly Dictionary<string, string> ProjectileDonors = new Dictionary<string, string> { { "StaffFiresWizard", "StaffFireball" } };
@@ -311,10 +311,10 @@ namespace VerdantsAscent
             yield return new WaitForEndOfFrame();
 
             AddItemsToObjectDB();
-            BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance);   // 1.0.18
+            BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance);
 
             AddPrefabsToZNetScene(ZNetScene.instance);
-            BackpackCraftingAndLoot.AddChestLoot(ZNetScene.instance);   // 1.0.18 (idempotent per chest)
+            BackpackCraftingAndLoot.AddChestLoot(ZNetScene.instance);   // Idempotent per chest
 
             VAPieceManager.AddPiecesToHammer();
             VARecipeManager.UpdatePieceRequirements();
@@ -342,7 +342,7 @@ namespace VerdantsAscent
                 if (!IsObjectDBValid()) return;
 
                 AddItemsToObjectDB();
-                BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance);   // 1.0.18
+                BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance);
                 FiresCore.Materials.VanillaShaderRebind.RebindPrefabs(itemPrefabs.Concat(piecePrefabs), PluginName);
             }
         }

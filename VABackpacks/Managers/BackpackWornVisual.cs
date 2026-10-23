@@ -10,7 +10,7 @@ using UnityEngine.Rendering;
 namespace VerdantsAscent.Managers
 {
     /// <summary>
-    /// 1.0.24: a worn shoulder bag shows on the player's back.
+    /// A worn shoulder bag shows on the player's back.
     ///
     /// Shoulder bags are kept out of m_shoulderItem so a cape can be worn
     /// with them (see BackpackManager, "Cape + Backpack coexistence"), so
@@ -42,7 +42,7 @@ namespace VerdantsAscent.Managers
         private sealed class State
         {
             public Player Player;
-            public bool IsHumanoid;                // 1.0.78: cached once per VisEquipment (no GetComponent per frame)
+            public bool IsHumanoid;                // Cached once per VisEquipment (no GetComponent per frame)
             public int Hash;                       // what is drawn now (0 = nothing)
             public ItemDrop.ItemData HashedItem;   // owner side: the item whose name hash is cached below
             public int ItemHash;
@@ -67,7 +67,7 @@ namespace VerdantsAscent.Managers
         {
             public static void Postfix(VisEquipment __instance)
             {
-                // 1.0.78 (Fire: companions get backpacks like the player): any Humanoid, not only players (checked once per
+                // Any Humanoid, not only players (checked once per
                 // VisEquipment in Refresh). A non-player's bag comes from its ZDO va_bp_worn, written by BackpackApi.SetWornBag.
                 if (Headless || __instance.m_isArmorStand) return;
                 try { Refresh(__instance); }
@@ -169,7 +169,7 @@ namespace VerdantsAscent.Managers
             return null;
         }
 
-        /// <summary>1.0.50: the worn bag's drawn part on this player (the first, normally the only one), null when none.</summary>
+        /// <summary>The worn bag's drawn part on this player (the first, normally the only one), null when none.</summary>
         internal static GameObject WornVisualOf(Player player)
         {
             var ve = player != null ? player.GetComponent<VisEquipment>() : null;
@@ -219,7 +219,7 @@ namespace VerdantsAscent.Managers
         }
 
         /// <summary>
-        /// 1.0.25: the bag's worn mesh as a standalone object, standing upright as it hangs on a back (the camp's chest
+        /// The bag's worn mesh as a standalone object, standing upright as it hangs on a back (the camp's chest
         /// decoration uses it): one child MeshRenderer per worn mesh, posed in the frame of the player's root (+Y up, the
         /// bag's back panel facing +Z, where the player's back would be). Null when the prefab has no one-bone worn mesh
         /// (the Hobo Stick and Wizard Staff).

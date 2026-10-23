@@ -84,7 +84,7 @@ namespace VerdantsAscent.Managers
         // correctly across logout.
         //
         // While a backpack is in our dict (not m_shoulderItem), vanilla's
-        // VisEquipment doesn't draw it, so BackpackWornVisual (1.0.24)
+        // VisEquipment doesn't draw it, so BackpackWornVisual
         // draws the bag's worn model on the player's back itself, next to
         // any cape.
         private static readonly Dictionary<Humanoid, ItemDrop.ItemData> _equippedBackpacks = new();
@@ -98,7 +98,7 @@ namespace VerdantsAscent.Managers
 
         /// <summary>Public accessor used by BackpackApi to find the
         /// currently-equipped backpack on a Player.</summary>
-        /// <summary>1.0.20: the live bag inventory on the player's Container in legacy mode (null otherwise), and the bag that owns it.</summary>
+        /// <summary>The live bag inventory on the player's Container in legacy mode (null otherwise), and the bag that owns it.</summary>
         internal static Inventory LegacyLiveInventory(Player player, out ItemDrop.ItemData owner)
         {
             owner = _activeContainerOwner;
@@ -171,7 +171,7 @@ namespace VerdantsAscent.Managers
         /// looking at the loaded assembly list for VAInventory.
         ///
         /// IMPORTANT: BepInEx plugin load order isn't guaranteed. If
-        /// VABackpacks runs Initialize() BEFORE VAInventory's assembly
+        /// VABackpacks runs Initialize BEFORE VAInventory's assembly
         /// is loaded into the AppDomain, this check sees no VAInventory
         /// and falls back to legacy mode — even though VAInventory will
         /// load moments later. Symptom in logs: lots of "[VAInventory]"
@@ -180,7 +180,7 @@ namespace VerdantsAscent.Managers
         /// To avoid that race we run detection a second time on the
         /// first Player.OnSpawned (see Player_OnSpawned_Patch below),
         /// which fires well after every plugin's Awake. The first call
-        /// from Initialize() still sets a useful default for any code
+        /// from Initialize still sets a useful default for any code
         /// that runs pre-spawn. Calls after _storageModeFinalized are
         /// no-ops so the mode can't oscillate after a player has
         /// already spawned with a Container set up.
@@ -224,7 +224,7 @@ namespace VerdantsAscent.Managers
             public static void Postfix(Player __instance)
             {
                 // Re-run storage-mode detection now that the AppDomain
-                // is fully loaded. Initialize() may have run before
+                // is fully loaded. Initialize may have run before
                 // VAInventory's assembly was loaded (BepInEx plugin
                 // order isn't guaranteed) — by OnSpawned every plugin's
                 // assemblies are guaranteed to be present.
@@ -742,7 +742,7 @@ namespace VerdantsAscent.Managers
                 Container container = player.gameObject.GetComponent<Container>();
                 if (container == null)
                 {
-                    // 1.0.33: at character load the worn bags are equipped again before VAInventory switches VABackpacks out of
+                    // At character load the worn bags are equipped again before VAInventory switches VABackpacks out of
                     // legacy mode, so there is no legacy Container yet; VAInventory takes the storage over right after. Harmless.
                     if (ConfigManager.Instance?.configVerboseLogging?.Value == true) Debug.Log($"{MyMod.PluginName}: no legacy Container on the player during equip (load-time, before VAInventory takes over storage)");
                 }
@@ -887,11 +887,7 @@ namespace VerdantsAscent.Managers
                 if (add) seMan.AddStatusEffect(hash, true);
                 else seMan.RemoveStatusEffect(hash, true);
             }
-            if (config.SpeedModifier != 0f)
-            {
-                // Speed modifier handled in SE_Stats via ModifySpeed
-                // We use a custom SE_Stats instance if needed, but for now assume it's covered by existing systems
-            }
+            // SpeedModifier: applied by BackpackSettingsPatches.Speed_Patch (Player.GetEquipmentMovementModifier).
         }
 
         public static bool IsBackpack(ItemDrop.ItemData item)
@@ -985,7 +981,7 @@ namespace VerdantsAscent.Managers
                 Inventory inv = (Inventory)_containerInventoryField?.GetValue(container);
                 if (inv == null || !_configs.TryGetValue(__instance.m_dropPrefab.name, out var config)) return;
 
-                // 1.0.49: a bag bonus (FRC) multiplies the contents' weight too; 1 without one
+                // A bag bonus (FRC) multiplies the contents' weight too; 1 without one
                 float[] bonus = BackpackApi.GetBonus(__instance);
                 float factor = bonus != null ? bonus[BackpackApi.BonusContentsWeightFactor] : 1f;
                 float reduced = inv.GetTotalWeight() * config.WeightReduction * factor;
@@ -997,13 +993,13 @@ namespace VerdantsAscent.Managers
 
         public static void Update()
         {
-            // 1.0.22: MyMod.Update calls this AND a Harmony postfix on MyMod.Update calls it again, so a single B press
+            // MyMod.Update calls this AND a Harmony postfix on MyMod.Update calls it again, so a single B press
             // toggled twice in one frame (with VAInventory: Show, then Hide). Once per frame.
             if (Time.frameCount == s_updateFrame) return;
             s_updateFrame = Time.frameCount;
             if (Player.m_localPlayer == null || InventoryGui.instance == null) return;
 
-            // 1.0.43 (Fire: no keybinds while typing, e.g. in the hammer filter): raw hotkeys wait while a text field has input.
+            // Raw hotkeys wait while a text field has input.
             if (!IsFiresInputCaptured() && Input.GetKeyDown(ConfigManager.Instance.configBackpackHotkey.Value))
             {
                 // Never fire the hotkey while another UI owns input. Opening/closing the
@@ -1071,8 +1067,8 @@ namespace VerdantsAscent.Managers
         private static PropertyInfo _firesIsCapturingProp;
         private static MethodInfo _firesIsTyping;
 
-        // 1.0.47 (Fire, team-wide: typing in any input field blocks every mod hotkey): Core 0.2.376's
-        // FiresInputBlock.IsTyping() is the one shared check; older Core falls back to IsCapturing.
+        // Core 0.2.376's
+        // FiresInputBlock.IsTyping is the one shared check; older Core falls back to IsCapturing.
         internal static bool IsFiresInputCaptured()
         {
             if (!_firesGateResolved)
@@ -1093,9 +1089,9 @@ namespace VerdantsAscent.Managers
         }
 
         /// <summary>
-        /// 1.0.51: only the cached Rows/Columns follow an in-game config change. Deliberately NOT OnConfigReloaded, which re-runs
+        /// Only the cached Rows/Columns follow an in-game config change. Deliberately NOT OnConfigReloaded, which re-runs
         /// OnEquipItem on the worn bag and so would rebuild its block live, before its contents are saved. The worn bag takes the
-        /// new size on its next equip, through VAInventory's items-safe restore (Fire 10-13).
+        /// new size on its next equip, through VAInventory's items-safe restore.
         /// </summary>
         public static void RefreshGridSizes()
         {

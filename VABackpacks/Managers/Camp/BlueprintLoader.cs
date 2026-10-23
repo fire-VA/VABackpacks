@@ -82,7 +82,7 @@ namespace VerdantsAscent.Managers.Camp
             /// origin is either the named center piece (rotated so its
             /// forward becomes +Z) or, lacking that, the bounding-box
             /// center with Y at the lowest object. Mirrors
-            /// InfinityHammer.Blueprint.Center().
+            /// InfinityHammer.Blueprint.Center.
             /// </summary>
             public Vector3 Center(string centerPieceOverride)
             {
@@ -287,7 +287,7 @@ namespace VerdantsAscent.Managers.Camp
                         break;
                     case Section.TerrainHeight:
                     case Section.TerrainPaint:
-                        // Parsed but not applied — TODO when the camp grows
+                        // Parsed but not applied yet; reserved for a future
                         // a "level the ground from a recorded heightmap"
                         // feature beyond what mud_road provides.
                         break;

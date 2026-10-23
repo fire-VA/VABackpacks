@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace VerdantsAscent.Managers
 {
-    // 1.0.60 (Fire 10-14, Tools\STAFF_PROJECTILES_PLAN.md): one projectile per staff, by element and style. Each is a runtime clone of a
+    // One projectile per staff, by element and style. Each is a runtime clone of a
     // vanilla projectile (and of its hit effects), retinted ONCE at load: no bundle, no per-frame code, damage untouched (it comes from the
     // staff's item data). [Early Magic] Staff Projectiles = Shared (today's fireball / ice shard, the default) | Styled. The clones are
     // always registered in ZNetScene, so every peer knows them whichever mode is on; the synced switch only picks what the staff fires.
@@ -38,7 +38,7 @@ namespace VerdantsAscent.Managers
         internal static void Bind(ConfigFile cfg, ConfigSync sync)
         {
             Mode = cfg.Bind("Early Magic", "Staff Projectiles", "Shared",
-                new ConfigDescription("Shared = every staff fires the vanilla fireball (Frostglass the ice shard) and shows the original held spores, as before 1.0.60. Styled = each staff fires its own retinted projectile and hit effect, and (1.0.61) its held particles and light take the staff's colour (Tools\\STAFF_PROJECTILES_PLAN.md). Visual only; damage is the same. Server-synced.",
+                new ConfigDescription("Shared = every staff fires the vanilla fireball (Frostglass the ice shard) as before 1.0.60. Styled = each staff fires its own retinted projectile and hit effect, plus an extra element particle system on the held staff (Tools\\STAFF_PROJECTILES_PLAN.md). Either way the held staff glows in its own colour (1.0.89). Visual only; damage is the same. Server-synced.",
                     new AcceptableValueList<string>("Shared", "Styled")));
             sync?.AddConfigEntry(Mode);
             Mode.SettingChanged += (_, __) => EarlyMagic.ReapplyStaffs();
@@ -49,7 +49,7 @@ namespace VerdantsAscent.Managers
         // the staff's projectile in Styled mode, or null (keep the shared one)
         internal static GameObject For(string staffId) => Styled && Clones.TryGetValue(staffId, out var go) && go != null ? go : null;
 
-        // 1.0.64 ([wishbone]): the staff's own clone whatever the mode; Staff Attack Styles needs a per-staff projectile to carry its behaviour
+        // The staff's own clone whatever the mode; Staff Attack Styles needs a per-staff projectile to carry its behaviour
         internal static GameObject Clone(string staffId) => Clones.TryGetValue(staffId, out var go) && go != null ? go : null;
 
         // ZNetScene.Awake: build the clones once (the sources are ZNetScene prefabs), then register them in every new ZNetScene
@@ -153,7 +153,7 @@ namespace VerdantsAscent.Managers
         }
 
 
-        // ── held FX (1.0.61, Fire 10-14: every staff showed the same green spores) ─────────────────────────────────────
+        // ── held FX ─────────────────────────────────────
         // The staff's own particle systems + lights (the item prefab, so every new held/dropped copy follows) are retinted to the
         // staff's style in Styled mode and put back exactly in Shared. Originals are kept per component; nothing runs per frame.
         // Only particles and lights: the staff's wood/metal materials stay as they are. A staff already in hand follows on re-equip.
@@ -165,21 +165,25 @@ namespace VerdantsAscent.Managers
         {
             if (db == null) return;
             bool styled = Styled;
+            // The held spores
+            // and light ALWAYS take the staff's own colour; most servers run the default Staff Projectiles = Shared, which kept
+            // the donor's green. The setting now only picks the projectile (and the extra style system).
+            bool tint = true;
             foreach (var st in Styles)
             {
                 var item = db.GetItemPrefab("FiresStaff_" + st.staff);
-                if (item == null) continue;
+                if (item == null) { Debug.Log($"[EarlyMagic] {st.staff} held glow tint: no FiresStaff_{st.staff} item in this ObjectDB yet"); continue; }
                 int ps = 0, lights = 0;
                 foreach (var p in item.GetComponentsInChildren<ParticleSystem>(true))
                 {
-                    if (p.gameObject.name == HeldFxName) continue;   // 1.0.62: our own style system, handled by HeldExtra
+                    if (p.gameObject.name == HeldFxName) continue;   // Our own style system, handled by HeldExtra
                     var main = p.main; var col = p.colorOverLifetime; var pr = p.GetComponent<ParticleSystemRenderer>();
                     if (!HeldPs.TryGetValue(p, out var o))
                     {
                         o = new HeldOrig { start = main.startColor, colEnabled = col.enabled, col = col.color, size = main.startSizeMultiplier, mats = pr != null ? pr.sharedMaterials : null };
                         HeldPs[p] = o;
                     }
-                    if (styled)
+                    if (tint)
                     {
                         main.startColor = Keep(o.start.color, st.tint);
                         main.startSizeMultiplier = o.size * Mathf.Lerp(1f, st.size, 0.5f);
@@ -207,15 +211,15 @@ namespace VerdantsAscent.Managers
                 foreach (var li in item.GetComponentsInChildren<Light>(true))
                 {
                     if (!HeldLights.TryGetValue(li, out var c)) HeldLights[li] = c = li.color;
-                    li.color = styled ? st.tint : c;
+                    li.color = tint ? st.tint : c;
                     lights++;
                 }
-                int extra = HeldExtra(item, st.staff, st.tint, styled);   // 1.0.62
-                Debug.Log($"{MyMod.PluginName}: staff held fx: FiresStaff_{st.staff} {(styled ? "Styled " + ColorUtility.ToHtmlStringRGB(st.tint) : "Shared (originals)")}: {ps} particle system(s), {lights} light(s), {extra} style system(s) on{(ps + lights == 0 ? " - NOTHING to tint on this prefab" : "")}");
+                int extra = HeldExtra(item, st.staff, st.tint, styled);
+                Debug.Log($"[EarlyMagic] {st.staff} held glow tint: #{ColorUtility.ToHtmlStringRGB(st.tint)} on {ps} particle system(s)/{lights} light(s); {extra} {(styled ? "Styled" : "Shared")} style system(s) on{(ps + lights == 0 ? " - NOTHING to tint on this prefab" : "")}");
             }
         }
 
-        // ── 1.0.62 (the lead: colour alone does not read as frost/fire/lightning): one style system per staff ──────────────────
+        // ── Colour alone does not read as frost/fire/lightning: one style system per staff ──────────────────
         // A clone of the staff's own spore system (same material, so no new art), next to it on the prefab, with its modules
         // reshaped once at load: frost mist, rising embers, crackle sparks, dripping poison, a slow spirit halo. Max particles is
         // capped at 24 and the emission stays at or under the source's, so the budget is at most the spore system's again.

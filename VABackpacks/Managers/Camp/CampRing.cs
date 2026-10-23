@@ -1,5 +1,5 @@
-// CampRing - 1.0.41 (Fire: "the camp level radius needs to ACCURATELY show; we were within our circle when we built our last
-// camp"). ONE definition of the camp's save ring, used by the white ring around the chest (CampChestCircle) AND by pack-up
+// CampRing - the camp level radius must show accurately: what is inside the drawn circle is what gets packed.
+// ONE definition of the camp's save ring, used by the white ring around the chest (CampChestCircle) AND by pack-up
 // (pieces, plants, crops, terrain), so the drawn circle and the capture disc are the same circle: centre = the camp chest,
 // radius = the camp's save radius. A piece counts when any part of it reaches inside the ring (its colliders' closest
 // point, plus a small margin), not only its pivot.

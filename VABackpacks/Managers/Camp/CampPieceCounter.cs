@@ -1,5 +1,5 @@
-// CampPieceCounter - 1.0.44 (Fire: show how full a camp is while building in it, warn near the cap, and refuse a piece at the
-// cap). While the local player stands inside a camp's ring with the hammer (or cultivator) out, a small parchment box shows
+// CampPieceCounter - shows how full a camp is while building in it, warns near the cap, and refuses a piece at the
+// cap. While the local player stands inside a camp's ring with the hammer (or cultivator) out, a small parchment box shows
 // "Camp pieces: N / CAP (L#)". N is CampCapture.Collect over CampRing, the exact count the pack-up cap check uses, so the
 // counter and the pack-up never disagree. At 90% it turns amber with a one-time centre message; at the cap, placing one more
 // piece inside the ring is refused (Player.TryPlacePiece). When the packed-size limit (256 KB) would be reached first, the
@@ -17,9 +17,9 @@ namespace VerdantsAscent.Managers.Camp
         static CampPieceCounter _instance;
         static readonly ManualLogSource Log = BepInEx.Logging.Logger.CreateLogSource("VABackpacks.Camp");
 
-        // 1.0.45 (Fire: fps dips at his camp): the full ring scan is costly, so it runs once a second, and the packed-size
+        // The full ring scan is costly, so it runs once a second, and the packed-size
         // estimate (re-encodes every piece) only when the count changed and at most every 10 s, and only past half the cap.
-        const float CountEvery = 5f, WarnAt = 0.9f;   // [lead]: recount on a placed/removed piece, 5 s fallback
+        const float CountEvery = 5f, WarnAt = 0.9f;   // Recount on a placed/removed piece, 5 s fallback
         static bool _dirty = true;
         internal static void MarkDirty() => _dirty = true;
         static readonly System.Diagnostics.Stopwatch Watch = new System.Diagnostics.Stopwatch();
@@ -142,7 +142,7 @@ namespace VerdantsAscent.Managers.Camp
             GUI.Label(rect, text, style);
         }
 
-        // 1.0.45: a piece placed or removed anywhere marks the count stale; the next Update recounts (no per-frame scans).
+        // A piece placed or removed anywhere marks the count stale; the next Update recounts (no per-frame scans).
         [HarmonyPatch(typeof(Piece), nameof(Piece.SetCreator))]
         static class Piece_SetCreator_Dirty { static void Postfix() => MarkDirty(); }
 

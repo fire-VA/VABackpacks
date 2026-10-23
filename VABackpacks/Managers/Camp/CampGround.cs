@@ -7,19 +7,19 @@ using UnityEngine;
 namespace VerdantsAscent.Managers.Camp
 {
     /// <summary>
-    /// 1.0.70 ([wishbone], Fire 10-15 via the lead: "camp deployment still leaves a bit to be desired ... on already edited terrain").
-    /// The camp snapped every piece with ZoneSystem.GetGroundHeight, the generated heightmap, which never sees a voxel edit (FAT
+    /// Camp deployment on already edited terrain.
+    /// Older versions snapped every piece with ZoneSystem.GetGroundHeight, the generated heightmap, which never sees a voxel edit (FAT
     /// levels, the carried player ground, a dug edge). Saved-layout pieces weren't snapped at all (centre y + the saved offset). Then
-    /// each piece's pad levelled the ground to that wrong height, which raised the lumps in Fire's shot. Nothing kept the pieces apart
-    /// either (the chest moved to the centre in 1.0.41, so a saved woodpile could sit in it).
-    /// Always on (1.0.72; 1.0.70-1.0.71 had a key): every procedural piece is sampled on the real ground (FAT's
+    /// each piece's pad levelled the ground to that wrong height, which raised lumps. Nothing kept the pieces apart
+    /// either (the chest sits at the centre, so a saved woodpile could sit in it).
+    /// Always on: every procedural piece is sampled on the real ground (FAT's
     /// FatGroundProbe.VoxelSurfaceY, the topmost voxel floor; without FAT a ray onto terrain + pieces, never GetGroundHeight), kept clear of the pieces placed before it
     /// (footprint circles from the prefab's colliders), and moved when the ground under it spreads too much; a piece with no good spot
     /// within reach is left out with a message. One line per piece: prefab, sampled y, source, spread, nudge.
     /// </summary>
     internal static class CampGround
     {
-        // 1.0.72 (Fire 10-15 TEAM RULE: a fix is always on, no key): GroundTruePlacement is gone; the placement always runs
+        // GroundTruePlacement is gone; the placement always runs
         internal static ConfigEntry<float> MaxSpread;
         internal static bool On => true;
 
@@ -63,7 +63,7 @@ namespace VerdantsAscent.Managers.Camp
                 }
                 catch { }
             }
-            // no FAT ([lead]): a ray down onto the drawn ground (terrain + building pieces), never GetGroundHeight (it ignores edits)
+            // no FAT : a ray down onto the drawn ground (terrain + building pieces), never GetGroundHeight (it ignores edits)
             if (_groundMask == 0) _groundMask = LayerMask.GetMask("terrain", "Default", "static_solid", "piece");
             if (Physics.Raycast(new Vector3(x, hint + Reach, z), Vector3.down, out RaycastHit hit, Reach * 2f, _groundMask, QueryTriggerInteraction.Ignore))
             { y = hit.point.y; source = "raycast " + LayerMask.LayerToName(hit.collider.gameObject.layer); return true; }
@@ -75,7 +75,7 @@ namespace VerdantsAscent.Managers.Camp
         internal static float FootprintRadius(GameObject prefab)
         {
             if (prefab == null) return 0.5f;
-            // 1.0.74 ([lead] R-C2: bed x wood_stack overlapped 0.20 m; every piece logged "footprint 0.4 m"): Collider.bounds is EMPTY
+            // Collider.bounds is EMPTY
             // on an inactive prefab, so every piece fell to the minimum. The shapes themselves are read instead (box size/centre,
             // sphere, capsule, mesh bounds), through each collider's own transform, in the prefab root's space (rotation + scale).
             float r = 0.4f;
@@ -130,7 +130,7 @@ namespace VerdantsAscent.Managers.Camp
             foreach (var at in tries)
             {
                 if (!Clear(at, r, placed, out string hit)) { why = why ?? $"overlaps {hit}"; continue; }
-                // 1.0.71 ([seasons]): the probe's window centres on the generated ground at this x/z (only a HINT: the voxel read
+                // The probe's window centres on the generated ground at this x/z (only a HINT: the voxel read
                 // inside +-6 m is the answer, so edits still win); a saved spot's centre y + offset can be more than 6 m off on a steep site
                 float hint = want.y; string hintSrc = "spot y";
                 if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(at.x, want.y, at.z), out float gh)) { hint = gh; hintSrc = "generated ground"; }

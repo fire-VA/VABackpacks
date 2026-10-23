@@ -42,7 +42,7 @@ namespace VerdantsAscent.Managers.Camp
 
         /// <summary>
         /// Camp fires ignore weather. Vanilla `Fireplace.CheckWet` reads
-        /// `EnvMan.IsWet()` + `Cover.GetCoverForPoint` to decide whether
+        /// `EnvMan.IsWet` + `Cover.GetCoverForPoint` to decide whether
         /// rain/wind has snuffed the fire. Inside any camp radius we
         /// short-circuit the whole check, force `m_wet = false`, and
         /// skip the vanilla method — so a camp fire stays lit through
@@ -69,8 +69,8 @@ namespace VerdantsAscent.Managers.Camp
         }
 
         /// <summary>
-        /// Fire (2026-09-29): "the bed and work bench should bypass roof checks for camps"; last night the camp's workbench
-        /// refused with "needs a roof". Vanilla `CraftingStation.CheckUsable` wants the roof check point under a roof with
+        /// The camp bed and workbench bypass roof checks; otherwise the camp's workbench
+        /// refuses with "needs a roof". Vanilla `CraftingStation.CheckUsable` wants the roof check point under a roof with
         /// ≥ 70 % cover. Inside a camp radius the roof and cover part is skipped; a station that also needs a fire still
         /// needs one (vanilla's own second half, kept as is).
         /// </summary>
@@ -94,7 +94,7 @@ namespace VerdantsAscent.Managers.Camp
         }
 
         /// <summary>
-        /// Fire (2026-09-29): "You can sleep in the bed when it's raining". Vanilla `Bed.CheckWet` refuses while the player
+        /// The camp bed works in the rain. Vanilla `Bed.CheckWet` refuses while the player
         /// has the Wet status effect ("$msg_bedwet"). A bed inside a camp radius skips it; the camp is the shelter.
         /// </summary>
         [HarmonyPatch(typeof(Bed), "CheckWet")]

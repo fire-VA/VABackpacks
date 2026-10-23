@@ -1,4 +1,4 @@
-// BackpackSpecialSlots — 1.0.20 (Fire 10-07): upgraded bags (quality 2+) get special slots on a rail right of the grid.
+// BackpackSpecialSlots — upgraded bags (quality 2+) get special slots on a rail right of the grid.
 //   Small = tool; Day = tool + resources; Explorer, HoboStick, StaffFiresWizard = tool + resources + bypass.
 //   tool      : one weapon or tool, outside the grid.
 //   resources : one material stack; its weight counts a quarter.
@@ -132,7 +132,7 @@ namespace VerdantsAscent.Managers
             RefreshHolderWeight(bag);
         }
 
-        // 1.0.26 (round 12: "Wood x20 in the rail added 1.50 weight, need 10.00"): vanilla caches an inventory's total weight
+        // Vanilla caches an inventory's total weight
         // and refreshes it only when that inventory changes. A slot item lives in the bag's customData, so a slot write
         // changed the bag's weight (Weight_Patch) without refreshing the inventory that holds the bag: VAInventory takes the
         // item off the grid (refresh) and THEN writes the slot (none), so the total kept the old number.
@@ -240,7 +240,7 @@ namespace VerdantsAscent.Managers
         private static bool Blocks(ItemDrop.ItemData it, bool all)
             => it != null && (it.m_shared.m_toolTier >= 1000 || (!all && !it.m_shared.m_teleportable));
 
-        // Saved bag grids, parsed once per distinct string: [0] = any non-teleportable, [1] = any toolTier >= 1000.
+        // Saved bag grids, parsed once per distinct string: [0] = any non-teleportable, [1] = any toolTier >= 1000, [2] = any item.
         private static readonly Dictionary<string, bool[]> SavedCache = new Dictionary<string, bool[]>();
 
         private static bool SavedBlocks(string saved, bool all)
@@ -248,13 +248,14 @@ namespace VerdantsAscent.Managers
             if (string.IsNullOrEmpty(saved)) return false;
             if (!SavedCache.TryGetValue(saved, out bool[] f))
             {
-                f = new bool[2];
+                f = new bool[3];
                 try
                 {
                     var inv = new Inventory("vab_saved", null, 32, 32);
                     inv.Load(new ZPackage(saved));
                     foreach (ItemDrop.ItemData it in inv.GetAllItems())
                     {
+                        f[2] = true;
                         if (!it.m_shared.m_teleportable) f[0] = true;
                         if (it.m_shared.m_toolTier >= 1000) f[1] = true;
                     }
@@ -266,6 +267,16 @@ namespace VerdantsAscent.Managers
             return f[1] || (!all && f[0]);
         }
 
+        /// <summary>True when a saved bag grid holds at least one item (same one-parse cache as SavedBlocks).</summary>
+        internal static bool SavedHasItems(string saved)
+        {
+            if (string.IsNullOrEmpty(saved)) return false;
+            SavedBlocks(saved, true);
+            return SavedCache.TryGetValue(saved, out bool[] f) && f.Length > 2 && f[2];
+        }
+
+        internal static bool AnyStoredSpecial(ItemDrop.ItemData bag) => AnyStored(bag);
+
         [HarmonyPatch(typeof(Inventory), nameof(Inventory.IsTeleportable))]
         public static class Teleport_Patch
         {
@@ -276,7 +287,7 @@ namespace VerdantsAscent.Managers
                 if (p == null || __instance != p.GetInventory()) return;
                 bool all = allowAllItems || (ZoneSystem.instance != null && ZoneSystem.instance.GetGlobalKey(GlobalKeys.TeleportAll));
 
-                // Fire 10-07 (Q1 a): bag contents block portals in both modes. Legacy mode: the worn bag's live container.
+                // Bag contents block portals in both modes. Legacy mode: the worn bag's live container.
                 Inventory live = BackpackManager.LegacyLiveInventory(p, out ItemDrop.ItemData liveOwner);
                 if (live != null)
                     foreach (ItemDrop.ItemData it in live.GetAllItems())

@@ -44,14 +44,14 @@ namespace VerdantsAscent.Managers.Camp
         public int    BackpackColumns;
         public Vector3 CampCenter;        // world position of the campfire
         public float   CampRadius;        // for cover/bed bypass queries
-        public float   CampYaw;           // 1.0.35: the camp facing (degrees) its saved layout is relative to
-        public string  GroundBefore = "";  // 1.0.36: FAT voxel snapshot of the site before the camp (restored at pack-up)
-        public string  PreCamp = "";       // 1.0.74: FAT 0.2.945 absolute pre-camp capture (heightmap + paint + voxel); restored exactly at pack-up
-        public List<ZDOID> DeployedPieceIds = new(); // 1.0.44: pieces this camp's deploy placed (packed first when over the cap)
-        public float   SaveRadius;        // 1.0.40: the ring the camp saves (pieces, plants, terrain); the camp workbench shows it
-        // 1.0.22: the deployed bag's own item state (quality, variant, durability, crafter, world level and every
+        public float   CampYaw;           // The camp facing (degrees) its saved layout is relative to
+        public string  GroundBefore = "";  // FAT voxel snapshot of the site before the camp (restored at pack-up)
+        public string  PreCamp = "";       // FAT 0.2.945 absolute pre-camp capture (heightmap + paint + voxel); restored exactly at pack-up
+        public List<ZDOID> DeployedPieceIds = new(); // Pieces this camp's deploy placed (packed first when over the cap)
+        public float   SaveRadius;        // The ring the camp saves (pieces, plants, terrain); the camp workbench shows it
+        // The deployed bag's own item state (quality, variant, durability, crafter, world level and every
         // customData key except the contents, which go into the chest), so pack-up gives back the same bag.
-        // Base64 ZPackage from BackpackCampManager.CaptureItemState; empty for camps from before 1.0.22.
+        // Base64 ZPackage from BackpackCampManager.CaptureItemState; empty for camps from older versions.
         public string BackpackItemState = "";
 
         // ── ZDO key constants ─────────────────────────────────────────
@@ -75,12 +75,12 @@ namespace VerdantsAscent.Managers.Camp
         public const string KEY_CENTER_Y    = "va_camp_center_y";
         public const string KEY_CENTER_Z    = "va_camp_center_z";
         public const string KEY_RADIUS      = "va_camp_radius";
-        public const string KEY_ITEM_STATE  = "va_camp_bp_item"; // 1.0.22: base64 ZPackage of the bag's item state
-        public const string KEY_YAW         = "va_camp_yaw";     // 1.0.35
-        public const string KEY_GROUND_BEFORE = "va_camp_ground0"; // 1.0.36
-        public const string KEY_PRE_CAMP = "va_camp_precamp"; // 1.0.74 (add-only)
-        public const string KEY_SAVE_RADIUS = "va_camp_save_r"; // 1.0.40
-        public const string KEY_DEPLOYED    = "va_camp_deployed"; // 1.0.44
+        public const string KEY_ITEM_STATE  = "va_camp_bp_item"; // Base64 ZPackage of the bag's item state
+        public const string KEY_YAW         = "va_camp_yaw";
+        public const string KEY_GROUND_BEFORE = "va_camp_ground0";
+        public const string KEY_PRE_CAMP = "va_camp_precamp"; // Add-only key
+        public const string KEY_SAVE_RADIUS = "va_camp_save_r";
+        public const string KEY_DEPLOYED    = "va_camp_deployed";
 
         private Container _container;
         private ZNetView  _nview;
@@ -107,12 +107,12 @@ namespace VerdantsAscent.Managers.Camp
 
             HydrateFromZdo();
             ApplyContainerDimensions();
-            // 1.0.35: the camp chest IS the camp (it holds the bag's state and the piece list), so the hammer cannot remove
+            // The camp chest IS the camp (it holds the bag's state and the piece list), so the hammer cannot remove
             // it; packing up is how it goes. Its contents are never at risk from a hammer remove.
             var piece = GetComponent<Piece>();
             if (piece != null) piece.m_canBeRemoved = false;
             _hydrated = true;
-            // 1.0.25: the bag leaning on the chest is local decoration, so every client adds its own when the chest loads
+            // The bag leaning on the chest is local decoration, so every client adds its own when the chest loads
             // (before, only the deployer saw it, and only until the chest unloaded).
             try { BackpackCampManager.AttachBackpackVisualToChest(gameObject, BackpackPrefabName); }
             catch (System.Exception ex) { Debug.LogWarning($"[VABackpacks] Camp chest visual on load failed: {ex.Message}"); }
@@ -186,8 +186,8 @@ namespace VerdantsAscent.Managers.Camp
 
             // Register with the camp registry for cover-bypass queries.
             BackpackCampRegistry.Register(this);
-            if (GetComponent<CampChestCircle>() == null) gameObject.AddComponent<CampChestCircle>();   // 1.0.41: the save ring around the chest
-            CampPieceCounter.Ensure();   // 1.0.44: the camp piece counter
+            if (GetComponent<CampChestCircle>() == null) gameObject.AddComponent<CampChestCircle>();   // The save ring around the chest
+            CampPieceCounter.Ensure();   // The camp piece counter
             // And re-register the vegetation suppression so chunk reload
             // restores the "no new trees in here" behavior.
             BackpackCampManager.RegisterVegetationClearArea(CampCenter, CampRadius);
@@ -232,7 +232,7 @@ namespace VerdantsAscent.Managers.Camp
             // Resize the underlying Inventory. We can't replace it
             // wholesale without losing items, so use Inventory.Resize via
             // reflection if available; otherwise build a new one and copy.
-            // Container exposes GetInventory() but not a public resize,
+            // Container exposes GetInventory but not a public resize,
             // so we go through the Inventory's m_width/m_height fields.
             try
             {

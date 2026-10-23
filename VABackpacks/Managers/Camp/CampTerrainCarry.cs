@@ -1,5 +1,5 @@
-// CampTerrainCarry - 1.0.36 (Fire's hand test 10-08: the camp footprint must keep the player's terrain edits, level,
-// raise, dig and paint, and bring them back on the next deploy). The ground inside the camp is captured at pack-up as a
+// CampTerrainCarry - the camp footprint keeps the player's terrain edits, level,
+// raise, dig and paint, and brings them back on the next deploy. The ground inside the camp is captured at pack-up as a
 // height + paint snapshot in the camp's frame and stamped again around the new camp, turned to its facing. The work is
 // FAT's (VerdantsAscent.Terrain.Voxel.FatTerrainSnapshot, voxel-only per our terrain rule), reached by reflection: without
 // FAT the camp keeps its own level-and-paint and nothing is carried.
@@ -17,7 +17,7 @@ namespace VerdantsAscent.Managers.Camp
 
         static bool _resolved;
         static MethodInfo _capture, _apply, _level, _reach;
-        // 1.0.74 (Fire 10-15: "packing up a camp should restore the terrain to what it was before"): FAT 0.2.945+'s absolute pre-camp
+        // FAT 0.2.945+'s absolute pre-camp
         // capture (heightmap + paint + voxel bounds/density over the footprint and skirt) and its restore (+ border heal)
         static MethodInfo _capturePre, _restorePre;
 
@@ -32,11 +32,11 @@ namespace VerdantsAscent.Managers.Camp
                 if (t == null) continue;
                 _capture = t.GetMethod("Capture", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Vector3), typeof(float), typeof(float) }, null);
                 _apply = t.GetMethod("Apply", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(byte[]), typeof(Vector3), typeof(float) }, null);
-                // 1.0.38: FAT 0.2.862+
+                // FAT 0.2.862+
                 _level = t.GetMethod("Level", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Vector3), typeof(float), typeof(float), typeof(int) }, null);
-                // 1.0.55: FAT 0.2.914+ (radius + its smooth skirt)
+                // FAT 0.2.914+ (radius + its smooth skirt)
                 _reach = t.GetMethod("LevelReach", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Vector3), typeof(float), typeof(float) }, null);
-                // 1.0.74: FAT 0.2.945+
+                // FAT 0.2.945+
                 _capturePre = t.GetMethod("CapturePreCamp", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Vector3), typeof(float) }, null);
                 _restorePre = t.GetMethod("RestorePreCamp", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(byte[]) }, null);
                 break;
@@ -47,7 +47,7 @@ namespace VerdantsAscent.Managers.Camp
             return _capture != null && _apply != null;
         }
 
-        /// <summary>1.0.55: FAT's level radius + skirt for these arguments, read BEFORE levelling; 0 when FAT has no LevelReach (&lt; 0.2.914).</summary>
+        /// <summary>FAT's level radius + skirt for these arguments, read BEFORE levelling; 0 when FAT has no LevelReach (&lt; 0.2.914).</summary>
         internal static float LevelReach(Vector3 center, float radius, float y)
         {
             if (!Resolve() || _reach == null) return 0f;
@@ -55,7 +55,7 @@ namespace VerdantsAscent.Managers.Camp
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] FAT LevelReach failed: {(ex.InnerException ?? ex).Message}"); return 0f; }
         }
 
-        /// <summary>1.0.38: FAT can level voxel ground (0.2.862+).</summary>
+        /// <summary>FAT can level voxel ground (0.2.862+).</summary>
         internal static bool CanLevel => Resolve() && _level != null;
 
         /// <summary>Fills below and carves above y in a disc, then paints (0 none, 1 dirt, 2 cultivated, 3 paved). why = null: no line.</summary>
@@ -103,7 +103,7 @@ namespace VerdantsAscent.Managers.Camp
             }
         }
 
-        /// <summary>1.0.74: deploy, BEFORE the level: FAT's absolute pre-camp capture as base64, or null (FAT older than 0.2.945).</summary>
+        /// <summary>Deploy, BEFORE the level: FAT's absolute pre-camp capture as base64, or null (FAT older than 0.2.945).</summary>
         internal static string CapturePreCamp(Vector3 center, float radius)
         {
             if (!Resolve() || _capturePre == null) return null;
@@ -116,7 +116,7 @@ namespace VerdantsAscent.Managers.Camp
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] pre-camp capture failed: {(ex.InnerException ?? ex).Message}"); return null; }
         }
 
-        /// <summary>1.0.74: pack-up / rollback: puts the pre-camp capture back exactly. False = no capture or FAT can't (the caller
+        /// <summary>Pack-up / rollback: puts the pre-camp capture back exactly. False = no capture or FAT can't (the caller
         /// uses the old restores).</summary>
         internal static bool RestorePreCamp(string b64, string why)
         {
@@ -124,7 +124,7 @@ namespace VerdantsAscent.Managers.Camp
             try
             {
                 // the blob is self-contained (absolute coordinates, or a small "ref" to the world store over 64 KB); the answer
-                // starts "ok" or "fail: <why>" ([worldgen] 0.2.945): a fail falls back to the old restores
+                // starts "ok" or "fail: <why>" ( 0.2.945): a fail falls back to the old restores
                 string line = _restorePre.Invoke(null, new object[] { Convert.FromBase64String(b64) }) as string ?? "fail: no answer";
                 bool ok = line.StartsWith("ok", StringComparison.OrdinalIgnoreCase);
                 Debug.Log(ok ? $"[VABackpacks] camp ground put back exactly ({why}, the pre-camp capture): {line}"

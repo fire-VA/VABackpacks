@@ -1,4 +1,4 @@
-// BagBonusPatches - 1.0.49 ([fgn], FRC section 15; Fire 10-13): bag affixes from another mod through BackpackApi.BonusProvider.
+// BagBonusPatches - bag affixes from another mod through BackpackApi.BonusProvider.
 // Without a provider (FRC not installed) every patch returns at once and nothing changes.
 //   carry weight    : Player.GetMaxCarryWeight, both modes
 //   loaded speed    : Player.GetEquipmentMovementModifier, while the bag HAS contents - legacy mode here; with VAInventory the

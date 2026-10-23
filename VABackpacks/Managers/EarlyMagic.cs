@@ -8,14 +8,13 @@ using UnityEngine;
 namespace VerdantsAscent.Managers
 {
     /// <summary>
-    /// 1.0.56 (Fire approved the early magic gear; [wishbone]'s Tools\EARLY_MAGIC_GEAR_DESIGN.md §9, my part per §9.4):
-    /// - 10 staffs FiresStaff_&lt;Name&gt; (bundle copies of the cleaned Wizard Staff with [saddles]' crown gems): item data
+    /// - 10 staffs FiresStaff_&lt;Name&gt; (bundle copies of the cleaned Wizard Staff with' crown gems): item data
     ///   from the §9.1 table, set here on every ObjectDB build;
     /// - 5 eitr foods FiresFood_&lt;Name&gt; (§9.2): runtime clones of a vanilla cooked food with their own name and stats;
-    /// - recipes for all 15, live only while the synced [Early Magic] Enabled is true (default false; Fire: new = config OFF).
+    /// - recipes for all 15, live only while the synced [Early Magic] Enabled is true (default false: new features ship OFF).
     ///   The prefabs are always registered so saved items still load.
     /// The 10 staffs are plain two-handed weapons, not bags. Projectiles: vanilla's own (fire = StaffFireball, frost =
-    /// StaffIceShards, the rest StaffFireball); [wishbone] recolours them and owns Mend / the charged bolt, attunement and
+    /// StaffIceShards, the rest StaffFireball); recolours them and owns Mend / the charged bolt, attunement and
     /// Ascension in RPGClasses.
     /// </summary>
     internal static class EarlyMagic
@@ -58,6 +57,54 @@ namespace VerdantsAscent.Managers
                 "The early magic gear (10 staffs + 5 eitr foods, Tools\\EARLY_MAGIC_GEAR_DESIGN.md): when false nothing can be crafted; items already owned still load. Server-synced.");
             sync?.AddConfigEntry(Enabled);
             Enabled.SettingChanged += (_, __) => ApplyEnabled(ObjectDB.instance);
+            // A staff's q1 damage =
+            // its tier's vanilla one-hand melee total (read from ObjectDB at load) x the share x the tier multiplier
+            const string sec = "Early Magic Damage";
+            for (int i = 0; i < TierNames.Length; i++)
+            {
+                TierMult[i] = cfg.Bind(sec, TierNames[i] + " multiplier", 1f, $"Multiplies every {TierNames[i]} staff's damage (reference: vanilla {TierRefItem[i]}). Server-synced.");
+                sync?.AddConfigEntry(TierMult[i]);
+                TierMult[i].SettingChanged += (_, __) => ReapplyStaffs();
+            }
+            ElementalShare = cfg.Bind(sec, "Elemental share", 0.9f, "Elemental staff bolt damage as a share of the tier's vanilla one-hand melee damage. Server-synced.");
+            BloodShare = cfg.Bind(sec, "Blood share", 0.6f, "Blood magic staff bolt damage as a share of the tier's vanilla one-hand melee damage (they also heal). Server-synced.");
+            PerQuality = cfg.Bind(sec, "Per quality", 0.12f, "Damage added per quality level, as a share of the q1 damage. Server-synced.");
+            MistileShare = cfg.Bind(sec, "Mistile share", 0.5f, "The homing Mistile (Bogfire, Sunfire) hits for this share of the bolt's damage, on top of the bolt. Server-synced.");
+            foreach (var e in new[] { ElementalShare, BloodShare, PerQuality, MistileShare }) { sync?.AddConfigEntry(e); e.SettingChanged += (_, __) => ReapplyStaffs(); }
+        }
+
+        internal static ConfigEntry<float> ElementalShare, BloodShare, PerQuality, MistileShare;
+        private static readonly string[] TierNames = { "Meadows", "Black Forest", "Swamp", "Mountain", "Plains" };
+        private static readonly string[] TierRefItem = { "Club", "SwordBronze", "SwordIron", "SwordSilver", "SwordBlackmetal" };
+        private static readonly float[] TierRefFallback = { 12f, 35f, 55f, 105f, 95f };   // used only when the vanilla item is missing
+        private static readonly ConfigEntry<float>[] TierMult = new ConfigEntry<float>[5];
+        private static int TierOf(string id)
+        {
+            switch (id)
+            {
+                case "EmberWand": case "Hearthwood": return 0;
+                case "Thunderpine": case "Mossbark": return 1;
+                case "Bogfire": case "Bloodroot": return 2;
+                case "Frostglass": case "Moonsilver": return 3;
+                default: return 4;   // Sunfire, Barleycrown
+            }
+        }
+        private static float TierRef(ObjectDB db, int t, out bool live)
+        {
+            var sh = db != null ? db.GetItemPrefab(TierRefItem[t])?.GetComponent<ItemDrop>()?.m_itemData?.m_shared : null;
+            float v = sh != null ? sh.m_damages.GetTotalDamage() : 0f;
+            live = v > 0f;
+            return live ? v : TierRefFallback[t];
+        }
+        private static float StaffDamage(ObjectDB db, string id, Skills.SkillType skill, float old, out string why)
+        {
+            int t = TierOf(id);
+            float r = TierRef(db, t, out bool live);
+            float share = skill == Skills.SkillType.BloodMagic ? (BloodShare?.Value ?? 0.6f) : (ElementalShare?.Value ?? 0.9f);
+            float m = TierMult[t]?.Value ?? 1f;
+            float v = Mathf.Round(r * share * m);
+            why = $"{TierNames[t]} ref {TierRefItem[t]} {r:0.#}{(live ? "" : " (FALLBACK, item missing)")} x {share:0.##} x {m:0.##} = {v:0.#} (was {old:0.#})";
+            return v;
         }
 
         // ── staffs ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -77,35 +124,37 @@ namespace VerdantsAscent.Managers
                 sh.m_maxDurability = 150f;
                 sh.m_durabilityPerLevel = 50f;
                 sh.m_maxQuality = 4;
-                sh.m_damages = Damage(s.element, s.dmg);
-                sh.m_damagesPerLevel = Damage(s.element, s.dmg * 0.2f);
-                // 1.0.67 ([classes-ui]'s 10 staff icons, Fire 10-15: the bar showed the Wizard Staff's generic stick): each staff its OWN array
+                float dmg = StaffDamage(db, s.id, s.skill, s.dmg, out string why);
+                sh.m_damages = Damage(s.element, dmg);
+                sh.m_damagesPerLevel = Damage(s.element, dmg * (PerQuality?.Value ?? 0.12f));
+                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{s.id} tier damage: {why}, +{PerQuality?.Value ?? 0.12f:0.##}/q");
+                // Each staff its OWN array
                 var icon = StaffIcon(s.id);
                 if (icon != null) sh.m_icons = new[] { icon };
                 var donor = s.element == "frost" ? shards ?? fireball : fireball;
                 if (sh.m_attack != null)
                 {
                     if (donor?.m_attackProjectile != null) sh.m_attack.m_attackProjectile = donor.m_attackProjectile;
-                    var styled = StaffProjectiles.For(s.id);   // 1.0.60: Styled mode, once the clones exist (ZNetScene.Awake)
-                    // 1.0.64 ([wishbone]): Staff Attack Styles rides on the staff's own clone, so it uses it even in Shared mode
+                    var styled = StaffProjectiles.For(s.id);   // Styled mode, once the clones exist (ZNetScene.Awake)
+                    // Staff Attack Styles rides on the staff's own clone, so it uses it even in Shared mode
                     if (styled == null && StaffAttackStyles.On) styled = StaffProjectiles.Clone(s.id);
                     if (styled != null) sh.m_attack.m_attackProjectile = styled;
-                    sh.m_attack.m_attackEitr = 4f;      // [wishbone]: early pools are 15-55
+                    sh.m_attack.m_attackEitr = 4f;      // Early pools are 15-55
                     sh.m_attack.m_attackStamina = 6f;
-                    StaffAttackStyles.Apply(sh, s.id, StaffProjectiles.Clone(s.id));   // 1.0.64: primary extras + the secondary (or back to plain when off)
+                    StaffAttackStyles.Apply(sh, s.id, StaffProjectiles.Clone(s.id));   // Primary extras + the secondary (or back to plain when off)
                 }
-                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{s.id} damage q1 blunt {sh.m_damages.m_blunt:0.#} fire {sh.m_damages.m_fire:0.#} frost {sh.m_damages.m_frost:0.#} lightning {sh.m_damages.m_lightning:0.#} poison {sh.m_damages.m_poison:0.#} spirit {sh.m_damages.m_spirit:0.#} (+{sh.m_damagesPerLevel.GetTotalDamage():0.#}/q), skill {sh.m_skillType}");   // 1.0.59: per staff, at load
+                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{s.id} damage q1 blunt {sh.m_damages.m_blunt:0.#} fire {sh.m_damages.m_fire:0.#} frost {sh.m_damages.m_frost:0.#} lightning {sh.m_damages.m_lightning:0.#} poison {sh.m_damages.m_poison:0.#} spirit {sh.m_damages.m_spirit:0.#} (+{sh.m_damagesPerLevel.GetTotalDamage():0.#}/q), skill {sh.m_skillType}");   // Per staff, at load
                 done++;
             }
             Debug.Log($"{MyMod.PluginName}: early magic: {done}/{Staffs.Length} staff(s) set up (projectiles: fireball {(fireball?.m_attackProjectile != null)}, ice shards {(shards?.m_attackProjectile != null)})");
         }
 
-        // 1.0.67: the staff icons (Resources\StaffIcons\item_Staff_<Name>.png, [classes-ui]), loaded once; a missing one keeps the old icon
+        // The staff icons (Resources\StaffIcons\item_Staff_<Name>.png,), loaded once; a missing one keeps the old icon
         private static readonly Dictionary<string, Sprite> Icons = new Dictionary<string, Sprite>();
         private static Sprite StaffIcon(string id)
         {
             if (Icons.TryGetValue(id, out var have)) return have;
-            // 1.0.76 ([fgn] DEDI_CLIENT_ONLY_AUDIT row 15): a headless server never draws an icon; no PNG decode there
+            // A headless server never draws an icon; no PNG decode there
             if (VerdantsAscent.Utilities.DedicatedStrip.Headless) { Icons[id] = null; return null; }
             Sprite s = null;
             try
@@ -133,10 +182,19 @@ namespace VerdantsAscent.Managers
             return s;
         }
 
-        // 1.0.60: [Early Magic] Staff Projectiles changed, or the clones were just built
+        // On a fresh game the held effect was not tinted to match the gem
+        // because the held tint ran only from ReapplyStaffs, which returns early when ZNetScene wakes before
+        // ObjectDB.instance is set - so it never ran. It now also runs right after the staff data in the ObjectDB hooks (Awake / CopyOtherDB).
+        private static void HeldTint(ObjectDB db)
+        {
+            try { StaffProjectiles.ApplyHeld(db); }
+            catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic: held glow tint failed: {e.Message}"); }
+        }
+
+        // [Early Magic] Staff Projectiles changed, or the clones were just built
         internal static void ReapplyStaffs()
         {
-            if (ObjectDB.instance == null) return;
+            if (ObjectDB.instance == null) { Debug.Log($"{MyMod.PluginName}: early magic: re-apply skipped (ObjectDB not up yet; the ObjectDB hooks apply the staffs + held glow)"); return; }
             try { ApplyStaffData(ObjectDB.instance); StaffProjectiles.ApplyHeld(ObjectDB.instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic: staff re-apply failed: {e.Message}"); }
             Debug.Log($"{MyMod.PluginName}: early magic: staff projectiles {(StaffProjectiles.Styled ? "Styled" : "Shared")}: " + string.Join(", ", Staffs.Select(s => s.id + "=" + (ObjectDB.instance.GetItemPrefab("FiresStaff_" + s.id)?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_attack?.m_attackProjectile?.name ?? "none")).ToArray()));
         }
@@ -150,8 +208,8 @@ namespace VerdantsAscent.Managers
                 case "frost": d.m_frost = v; break;
                 case "lightning": d.m_lightning = v; break;
                 case "poison": d.m_poison = v; break;
-                // 1.0.59 (EARLY_MAGIC_GEAR_DESIGN §9.5, [wishbone]: Fire saw the healer bolts do knockback but no damage; vanilla
-                // creatures are immune to spirit): the healer value is BLUNT, plus SPIRIT at half on top (undead take extra)
+                // Healer bolts would do knockback but no damage, as vanilla
+                // creatures are immune to spirit: the healer value is BLUNT, plus SPIRIT at half on top (undead take extra)
                 default: d.m_blunt = v; d.m_spirit = v * 0.5f; break;
             }
             return d;
@@ -232,7 +290,7 @@ namespace VerdantsAscent.Managers
             private static void Postfix(ObjectDB __instance)
             {
                 if (__instance == null || __instance.m_items == null || __instance.m_items.Count == 0) return;
-                try { ApplyStaffData(__instance); MakeFoods(__instance); AddRecipes(__instance); }
+                try { ApplyStaffData(__instance); MakeFoods(__instance); AddRecipes(__instance); HeldTint(__instance); }
                 catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic setup failed: {e}"); }
             }
         }
@@ -243,7 +301,7 @@ namespace VerdantsAscent.Managers
             [HarmonyPriority(Priority.VeryLow)]
             private static void Postfix(ObjectDB __instance)
             {
-                try { ApplyStaffData(__instance); MakeFoods(__instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic (menu DB) failed: {e.Message}"); }
+                try { ApplyStaffData(__instance); MakeFoods(__instance); HeldTint(__instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic (menu DB) failed: {e.Message}"); }
             }
         }
 
@@ -256,7 +314,7 @@ namespace VerdantsAscent.Managers
                 if (ObjectDB.instance != null) { try { MakeFoods(ObjectDB.instance); } catch { } }
                 AddFoodsToZNetScene(__instance);
                 try { StaffProjectiles.Build(__instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: staff projectiles failed: {e}"); }
-                // 1.0.64 ([wishbone]): the attack styles' AoEs + heal effects, after the projectile clones; its own try so it can't stop them
+                // The attack styles' AoEs + heal effects, after the projectile clones; its own try so it can't stop them
                 try { StaffAttackStyles.Build(__instance); StaffAttackStyles.RegisterEffects(ObjectDB.instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: staff attack styles failed: {e}"); }
                 try { ReapplyStaffs(); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: staff re-apply failed: {e}"); }
             }

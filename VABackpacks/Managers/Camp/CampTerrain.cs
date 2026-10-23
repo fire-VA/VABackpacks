@@ -18,7 +18,7 @@
 //      tool indexes against the same position the other expects.
 //   4. ClutterSystem.ResetGrass is idempotent.
 //      compiler.m_operations++ is idempotent.
-//      compiler.Save() + Heightmap.Poke(false) are idempotent.
+//      compiler.Save + Heightmap.Poke(false) are idempotent.
 //      Both sides call all three.
 //
 // Independence guarantees we maintain:
@@ -45,7 +45,7 @@
 //   4. Apply the operation by writing directly to those compiler arrays
 //      (no TerrainModifier piece spawn, no rogue ZDOs to destroy later).
 //   5. On every TerrainComp touched: claim ZNetView ownership, bump
-//      m_operations, call Save(), and Poke the heightmap to rebuild.
+//      m_operations, call Save, and Poke the heightmap to rebuild.
 //   6. ClutterSystem.ResetGrass over the radius so grass blades match
 //      the new terrain state.
 //
@@ -67,7 +67,7 @@ namespace VerdantsAscent.Managers.Camp
         // We link against a publicized assembly_valheim (libs/assembly_valheim_publicized.dll),
         // which exposes TerrainComp.m_levelDelta / m_smoothDelta / m_modifiedHeight /
         // m_paintMask / m_modifiedPaint / m_width / m_hmap / m_operations / m_lastOpPoint
-        // / m_lastOpRadius and TerrainComp.Save() and Heightmap.m_heights as public.
+        // / m_lastOpRadius and TerrainComp.Save and Heightmap.m_heights as public.
         // Same approach the rest of the modpack (FiresNPCs, BalrondArsenalReborn) uses.
 
         // ── Per-vertex snapshot records (mirror WEC) ──────────────────

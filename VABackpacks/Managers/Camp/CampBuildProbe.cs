@@ -1,6 +1,6 @@
-// CampBuildProbe - 1.0.35 (Fire: near the camp nothing could be built without devcommands "nobuild"). Read only: while
+// CampBuildProbe - diagnoses why building near a camp is blocked. Read only: while
 // the player holds a build ghost inside a camp, every change of vanilla's placement status is logged with the reason
-// and the nearest workbench's distance and range, so the next round names what blocks building.
+// and the nearest workbench's distance and range, so the log names what blocks building.
 
 using HarmonyLib;
 using UnityEngine;

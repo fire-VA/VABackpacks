@@ -92,11 +92,11 @@ namespace VerdantsAscent.Managers
         // this same customData field on equip/unequip, so the backpack
         // item carries its inventory wherever it goes (chest, ground, etc).
 
-        // -- Bag bonuses (1.0.49, [fgn] FRC section 15) --
+        // -- Bag bonuses --
         // A CONTRACT with FiresRPGCrafting (it sets the field by reflection, no reference to this DLL) and VAInventory.
         // BonusProvider(bag) returns float[] { carryWeight, contentsWeightFactor, loadedSpeed, extraSlots } - index order
         // fixed, append-only; null = no bonus. contentsWeightFactor 1 = none, 0.8 = contents weigh 20 % less; loadedSpeed is
-        // added to the movement modifier while the bag HAS contents; extraSlots is reserved (not applied, Fire 10-13).
+        // added to the movement modifier while the bag HAS contents; extraSlots is reserved (not applied).
         // Without a provider nothing changes.
 
         public const int BonusCarryWeight = 0, BonusContentsWeightFactor = 1, BonusLoadedSpeed = 2, BonusExtraSlots = 3;
@@ -161,7 +161,7 @@ namespace VerdantsAscent.Managers
             try { BonusChanged?.Invoke(player); } catch (Exception ex) { BonusLog.LogWarning($"BonusChanged handler threw {ex.Message}"); }
         }
 
-        // -- Worn bag visual (1.0.50, [fgn] FRC rarity aura) --
+        // -- Worn bag visual --
         // The bag on a player's back is VABackpacks' own attachment (BackpackWornVisual), not a VisEquipment item, so another mod
         // that dresses worn gear (FRC's rarity aura) hooks it here. Raised when the visual is built or replaced (the item is null
         // for ANOTHER player's bag: only its owner knows the item) and on removal (GameObject null).
@@ -179,7 +179,7 @@ namespace VerdantsAscent.Managers
         }
 
         /// <summary>
-        /// 1.0.78, add-only (Core's companions): the shoulder bag a NON-player Humanoid wears, by item prefab name (null or "" = none).
+        /// The shoulder bag a NON-player Humanoid wears, by item prefab name (null or "" = none).
         /// Writes the humanoid's ZDO "va_bp_worn" (the prefab name's stable hash) on its owner, so every client draws it on the body
         /// the same way as a player's bag. Players keep their own path (their equipped bag); this call is ignored for a Player.
         /// Returns false when the humanoid has no valid ZNetView or this client isn't its owner.
@@ -282,7 +282,7 @@ namespace VerdantsAscent.Managers
         /// </summary>
         public static bool IsSlotBasedStorageActive => !BackpackManager.LegacyMode;
 
-        // ── Special slots (1.0.20) ───────────────────────────────────
+        // ── Special slots ───────────────────────────────────
         // Upgraded bags (quality 2+) carry a rail of special slots right of the grid. Each slot holds one stack outside
         // the grid and outside the player inventory; ReadSpecialSlot returns the stored ItemData itself (never a copy).
 

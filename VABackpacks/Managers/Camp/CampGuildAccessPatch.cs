@@ -3,7 +3,7 @@
 //
 // Vanilla flow (Container.CheckAccess, private):
 //   switch (m_privacy) {
-//     case Private: return m_piece.GetCreator() == playerID;
+//     case Private: return m_piece.GetCreator == playerID;
 //     case Group:   return ...
 //     default:      return true;
 //   }

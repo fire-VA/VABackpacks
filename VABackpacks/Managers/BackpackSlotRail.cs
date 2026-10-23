@@ -1,4 +1,4 @@
-// BackpackSlotRail — 1.0.20 (Fire 10-07, [classes-ui] layout A): the special-slot rail in the vanilla container view
+// BackpackSlotRail — the special-slot rail in the vanilla container view
 // (legacy storage mode; with VAInventory loaded its own bag view draws the rail through BackpackApi).
 // The bag grid never moves. When the open container is the worn bag and the bag has special slots, a narrow column
 // appears right of the grid behind a thin line: tool, resources, bypass, top-down. Each slot is a clone of the

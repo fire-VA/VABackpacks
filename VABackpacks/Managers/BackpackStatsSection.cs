@@ -8,7 +8,7 @@ using VerdantsAscent.Managers.Camp;
 namespace VerdantsAscent.Managers
 {
     /// <summary>
-    /// 1.0.75 ([wishbone], Fire via [generator] / the lead 10-15: "the hub's Stats tab shows every mod's stats"): VABackpacks' card on
+    /// VABackpacks' card on
     /// Core 0.2.511's Stats tab (FiresShell.RegisterStatsSection, Tools\CORE_STATS_SECTIONS_API.md; order 410, right after RPGClasses).
     /// Data only (the worn bag, its slots and weight reduction, the active camp, the staff in hand); Core draws the card and reads it on
     /// the main thread only while the tab shows. The Core call sits alone in a NoInlining method inside try/catch, so an older Core

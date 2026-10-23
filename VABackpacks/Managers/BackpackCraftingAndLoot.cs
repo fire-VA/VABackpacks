@@ -9,7 +9,7 @@ using UnityEngine;
 namespace VerdantsAscent.Managers
 {
     /// <summary>
-    /// 1.0.18 (Fire 10-07): every backpack has a crafting recipe of its biome tier, and the three shoulder bags can turn up in
+    /// Every backpack has a crafting recipe of its biome tier, and the three shoulder bags can turn up in
     /// the vanilla location chests of their biome at a low chance.
     /// Recipes: one config string per bag, "station,level,Item:amount,Item:amount,..." (station is a CraftingStation prefab such
     /// as piece_workbench or forge). [General] EnableRecipes switches them all; an empty string leaves that bag uncraftable.
@@ -43,7 +43,7 @@ namespace VerdantsAscent.Managers
         private static readonly Dictionary<string, ConfigEntry<string>> UpgradeConfig = new Dictionary<string, ConfigEntry<string>>();
         private static ConfigEntry<int> _oneChestIn;
 
-        internal static IEnumerable<string> BagPrefabs => Bags.Select(b => b.Prefab);   // 1.0.63: ChestBagRarity
+        internal static IEnumerable<string> BagPrefabs => Bags.Select(b => b.Prefab);   // ChestBagRarity
 
         internal static void Bind(ConfigFile cfg, ConfigSync sync)
         {
@@ -52,7 +52,7 @@ namespace VerdantsAscent.Managers
                 RecipeConfig[b.Prefab] = cfg.Bind($"Recipes.{b.Prefab}", "Recipe", b.Recipe,
                     $"How {b.Prefab} is crafted: station prefab, station level, then Item:amount pairs (e.g. piece_workbench,1,LeatherScraps:6). Empty = not craftable.");
                 sync?.AddConfigEntry(RecipeConfig[b.Prefab]);
-                // 1.0.20: quality 2 at the workbench (one level higher than the craft) adds the bag's special slots.
+                // Quality 2 at the workbench (one level higher than the craft) adds the bag's special slots.
                 UpgradeConfig[b.Prefab] = cfg.Bind($"Recipes.{b.Prefab}", "Upgrade", "",
                     $"What upgrading {b.Prefab} to quality 2 costs, as Item:amount pairs (e.g. TrollHide:2,Bronze:1). Empty = half of each crafting ingredient, rounded up.");
                 sync?.AddConfigEntry(UpgradeConfig[b.Prefab]);
@@ -82,14 +82,14 @@ namespace VerdantsAscent.Managers
                 if (recipe == null) { Debug.LogWarning($"{MyMod.PluginName}: no recipe for {b.Prefab}: {why}"); continue; }
                 UpgradeConfig.TryGetValue(b.Prefab, out ConfigEntry<string> up);
                 if (!ApplyUpgrade(db, recipe, up?.Value, out why)) Debug.LogWarning($"{MyMod.PluginName}: {b.Prefab} upgrade cost: {why}; using half the recipe");
-                VerdantsAscent.Managers.Camp.CampLevels.ApplyToRecipe(db, recipe, item);   // 1.0.29: quality = camp level
+                VerdantsAscent.Managers.Camp.CampLevels.ApplyToRecipe(db, recipe, item);   // Quality = camp level
                 db.m_recipes.Add(recipe);
                 made++;
             }
             if (made > 0) Debug.Log($"{MyMod.PluginName}: added {made} backpack recipe(s).");
         }
 
-        // 1.0.21 (Fire 10-07): readable names; the bundle's m_name strings are leftovers (ExplorerBag_va read "FiresFirstBackpack").
+        // Readable names; the bundle's m_name strings are leftovers (ExplorerBag_va read "FiresFirstBackpack").
         // Display only: prefab names, saves and customData are untouched, and every ItemData shares the prefab's m_shared.
         private static readonly Dictionary<string, string> DisplayNames = new Dictionary<string, string>
         {
@@ -110,7 +110,7 @@ namespace VerdantsAscent.Managers
             }
         }
 
-        /// <summary>1.0.56: the same parser for EarlyMagic's staffs and foods.</summary>
+        /// <summary>The same parser for EarlyMagic's staffs and foods.</summary>
         internal static Recipe ParseRecipe(ObjectDB db, ItemDrop item, string text, out string why) => Parse(db, item, text, out why);
 
         private static Recipe Parse(ObjectDB db, ItemDrop item, string text, out string why)
@@ -215,7 +215,7 @@ namespace VerdantsAscent.Managers
                 }
             }
             Debug.Log($"{MyMod.PluginName}: backpack chest loot (about 1 in {_oneChestIn.Value}): {(touched.Count == 0 ? "no matching chest prefabs" : string.Join(", ", touched.ToArray()))}");
-            ChestBagRarity.LogAtLoad();   // 1.0.63: whether FloApi.Roll resolved, once
+            ChestBagRarity.LogAtLoad();   // Whether FloApi.Roll resolved, once
         }
 
         private static bool Matches(string lowerName, string[] keys)

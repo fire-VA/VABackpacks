@@ -99,7 +99,7 @@ namespace VerdantsAscent.Managers
         public void Initialize(ConfigFile config)
         {
             // ────── General Settings ──────
-            // Off by default (1.0.17; Fire, 2026-10-01: cut verbose logging; every other Fires mod defaults it off).
+            // Off by default, like every other Fires mod, to keep logs short.
             configVerboseLogging = config.Bind("General", "VerboseLogging", false,
                 "Enable detailed debug logs.");
             configEnableRecipes = config.Bind("General", "EnableRecipes", true,
@@ -157,7 +157,7 @@ namespace VerdantsAscent.Managers
                 "Backpacks.Camp", "BedPrefab", "rawood_bed_bal,bed",
                 "Comma-separated fallback chain of bed prefab names. Tries each in order, uses the first that's registered with ZNetScene. Default prefers Balrond's Amazing Nature 'rawood_bed_bal' when that mod is loaded, falls back to vanilla 'bed'. Roof check is bypassed inside the camp radius.");
 
-            Camp.CampGround.Bind(config);   // 1.0.70: camp ground placement (always on since 1.0.72); GroundTrueMaxSpread tolerance
+            Camp.CampGround.Bind(config);   // Camp ground placement (always on); GroundTrueMaxSpread tolerance
             configCampWoodpilePrefab = config.Bind(
                 "Backpacks.Camp", "WoodpilePrefab", "wood_stack",
                 "ZNetScene prefab for the decorative wood pile. Set to empty string to skip.");
@@ -223,7 +223,7 @@ namespace VerdantsAscent.Managers
             {
                 string section = $"Backpack.{prefabName}";
 
-                // 1.0.19 (Fire 10-07): a grid per tier (columns x rows) - Small 5x2, Day 6x3, Explorer 7x4, the camp bags 5x3;
+                // A grid per tier (columns x rows) - Small 5x2, Day 6x3, Explorer 7x4, the camp bags 5x3;
                 // an upgrade (quality 2+) adds special slots, never grid. Others' bags keep the old 6x4.
                 (int cols, int rows) grid = DefaultGrid(prefabName);
                 configBackpackRows[prefabName] = config.Bind(section, "Rows", grid.rows,
@@ -231,9 +231,9 @@ namespace VerdantsAscent.Managers
 
                 configBackpackColumns[prefabName] = config.Bind(section, "Columns", grid.cols,
                     new ConfigDescription($"Number of columns in {prefabName} inventory grid.", new AcceptableValueRange<int>(1, 20)));
-                // 1.0.51 (R-1013J bag_resize_test): an in-game change (Config Manager, the server's sync) is a self-write, which the
+                // An in-game change (Config Manager, the server's sync) is a self-write, which the
                 // file watcher skips on purpose, so the bag kept its load-time size until a restart. The cached size follows the
-                // entry now; the bag takes it on its next equip (Fire 10-13: a worn bag resizes on the next open / equip).
+                // entry now; the bag takes it on its next equip (a worn bag resizes on the next open / equip).
                 configBackpackRows[prefabName].SettingChanged += (_, __) => BackpackManager.RefreshGridSizes();
                 configBackpackColumns[prefabName].SettingChanged += (_, __) => BackpackManager.RefreshGridSizes();
 

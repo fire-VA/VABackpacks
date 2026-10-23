@@ -1,4 +1,4 @@
-// CampLevels — 1.0.29 (Fire 10-08, camp upgrades plan step 1): a bag's quality is its camp level. Each level has a radius and a
+// CampLevels — a bag's quality is its camp level. Each level has a radius and a
 // piece cap ([Camp] Radius / PieceCap, server-synced). Max quality per bag: Small 2, Day 3, Explorer / Hobo Stick / Staff 4.
 // Upgrades use the bag's recipe (half the craft cost per level); level 3 and 4 add [Camp] Level3Extra / Level4Extra on top.
 // The workbench tops out at level 5, so a bag's required station level is capped there.
@@ -35,7 +35,7 @@ namespace VerdantsAscent.Managers.Camp
         {
             _radius = cfg.Bind("Camp", "Radius", "10,20,30,40", "Camp radius in metres for camp level (bag quality) 1,2,3,4.");
             _pieceCap = cfg.Bind("Camp", "PieceCap", "500,1000,1500,2000", "Most pieces a camp can pack, for camp level 1,2,3,4.");
-            // 1.0.44 (Fire chose a level-1 cap of 500, the higher levels scaled from it): a config still on the old default moves
+            // A config still on the old default moves
             // to the new one; a value the player set by hand is kept.
             if (_pieceCap.Value.Replace(" ", "") == "100,200,300,500")
             {
