@@ -51,3 +51,5 @@ vapieces
 # OS noise
 Thumbs.db
 desktop.ini
+# Local backups from doc cleanups
+*.pre_cleanup_*

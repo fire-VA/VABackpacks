@@ -1,75 +1,60 @@
 # VABackpacks
 
-Real backpacks with real storage for Valheim: five bags, workbench upgrades with special slots, and bags that
-unpack into camps. Part of the Fires mod family.
+Real backpacks with real storage for Valheim. Five bags you can craft or find, upgrade at the workbench, and unpack
+into a full camp wherever you stop for the night. Part of the Fires mod family.
 
 ## What you get
 
-- **Five bags.** The Small Bag, Day Bag and Explorer Bag wear on your shoulder and show on your back, cape or not.
+- **Five bags.** The Small Bag, Day Bag and Explorer Bag are worn on your shoulder and show on your back, cape or not.
   The Hobo Stick and the Fires Wizard's Staff carry their load in hand.
-- **Crafted or found.** Each bag is made at the workbench. The shoulder bags can also turn up in location chests of
-  their biome: the Small Bag in the Meadows, the Day Bag in the Black Forest, the Explorer Bag in the Swamp and
-  Mountains.
-- **The contents travel with the bag.** Everything is stored in the bag item itself. Give it to a friend, put it in
-  a chest or drop it, and the contents go along. On death the bag lands in your tombstone with its contents intact.
-- **Open it anywhere.** Equip a bag and press B to open its storage.
+- **Crafted or found.** Every bag is made at the workbench. The shoulder bags can also turn up in chests: the Small
+  Bag in the Meadows, the Day Bag in the Black Forest, the Explorer Bag in the Swamp and Mountains.
+- **The contents travel with the bag.** Give it to a friend, put it in a chest or drop it, and everything inside goes
+  with it. If you die, the bag lands in your tombstone with its contents intact.
 - **Workbench upgrades.** A quality 2 bag gets special slots beside its grid:
   - Small Bag: a tool slot (one weapon or tool).
-  - Day Bag: tool + resources slot (one stack that weighs a quarter as much).
-  - Explorer Bag, Hobo Stick, Staff: tool + resources + teleport bypass slot (one non-teleportable stack goes
+  - Day Bag: tool slot + resources slot (one stack that weighs a quarter as much).
+  - Explorer Bag, Hobo Stick, Staff: tool + resources + teleport bypass slot (one non-teleportable stack can go
     through portals).
   - Quality 3 and 4 make the bag's camp bigger.
-- **Bags become camps.** Drop a bag, look at it and hold the Use key (E) for 3 seconds, or hold Shift+B. It unpacks
-  into a camp: a campfire with a cooking grill, the bag standing open as your chest with everything inside, a
-  workbench, bed, log bench and a wood pile that gives a small daily wood ration, on smoothed ground. Swing the Hobo
-  Stick or Staff with the middle mouse button to slam-deploy a camp where it lands.
-- **Pack it back up.** Look at the camp chest and hold Shift+B again. The camp folds back into the bag and the
-  ground is restored. The bag goes back into your inventory, or at your feet if it is full. Your own buildings inside
-  the camp radius pack up with it and come back on the next deploy. One camp per character.
-- **Bag perks**, set per bag in the config: cold and wet resistance, feather fall, extra carry strength. All off by
-  default.
+- **Bags become camps.** A campfire with a cooking grill, the bag standing open as your chest, a workbench, bed, log
+  bench and a wood pile that gives a little wood each day, all on flattened ground.
+- **Pack it back up.** The camp folds back into the bag and the ground is put back. Anything you built inside the
+  camp packs up with it and comes back next time. One camp per character.
+- **Bag perks** (set per bag in the config, all off by default): cold and wet resistance, feather fall, extra carry
+  strength.
+- **Early magic staffs** (off by default, turn on `[Early Magic] Enabled`): ten early staffs and five eitr foods. With
+  `Staff Attack Styles` on, each staff has its own primary and secondary attack; placed attacks show a ground ring you
+  aim and left click to cast.
 
-Rules: no bag inside a bag, and a bag can't be quick-moved into itself.
+## How to use
+
+- Equip a bag and press **B** to open it.
+- **Make camp:** drop the bag, look at it and hold **E** for 3 seconds, or hold **Shift+B**. With the Hobo Stick or
+  Staff, swing with the middle mouse button to slam a camp down where it lands.
+- **Pack up:** look at the camp chest and hold **Shift+B**. The bag goes back into your inventory (or at your feet if
+  you're full).
+- You can't put a bag inside another bag.
+
+## Install
+
+- Install with a mod manager, or copy the `VABackpacks` folder into `BepInEx/plugins`.
+- Install on every client and on the dedicated server.
 
 ## Requires
 
 - BepInExPack for Valheim
-- FiresUnifiedCore 0.2.389 or newer
+- FiresUnifiedCore
 - VAInventory (optional) - shows each worn bag's grid inside the inventory panel.
 - FiresGuilds (optional) - guildmates can use your camp chest.
 
-## Installation
+## Good to know
 
-- Install with a mod manager, or copy the `VABackpacks` folder into `BepInEx/plugins`.
-- Client and dedicated server.
-
-## Configuration
-
-Settings live in `BepInEx/config/com.Fire.VA_Backpacks.cfg`.
-
-- `[Backpacks] OpenHotkey` (default B).
-- `[Backpack.<bag>]` per bag (`SmallBag_va`, `DayBag_va`, `ExplorerBag_va`, `HoboStick`, `StaffFiresWizard`):
-  - `Rows` / `Columns` - storage size. Defaults: Small 5x2, Day 6x3, Explorer 7x4, Hobo Stick and Staff 5x3.
-  - `WeightReductionMultiplier` (default 0.5) - contents weight when used without VAInventory's panels.
-  - `ColdResistance`, `WetResistance`, `FeatherFall`, `StrengthBonus` (all default off).
-  - `CampBlueprint` (+ `CampBlueprintYOffset`) - optional PlanBuild blueprint to use as this bag's camp layout.
-  - `SpeedModifier` and `Teleportable` are in the file but do nothing yet.
-- `[Recipes.<bag>]` - `Recipe` (station, level, Item:amount pairs; empty = not craftable) and `Upgrade` (the quality
-  2 cost; empty = half of each crafting ingredient). `[General] EnableRecipes` (default on) is the master switch.
-- `[Loot] One chest in` (default 40) - about one chest in this many in a bag's biome holds that bag. 0 = never.
-- `[Camp]` - `Radius` (10,20,30,40 m) and `PieceCap` (500 to 2000) per camp level, `Level3Extra` (Iron:5) and
-  `Level4Extra` (Silver:5) upgrade costs, `CustomCamps` (default on).
-- `[CampStorage]` - how much items weigh while packed inside a camp's chests, by kind (food and gear 0, ore and bars
-  5%, everything else 1%).
-- `[Backpacks.Camp]` - `Enabled` (default on), `GestureKey` (B; Shift is always required), `HoldDurationSeconds`
-  (3), and the prefab used for each camp piece. `[Backpacks.Camp.Blueprint]` decides which normal camp pieces still
-  spawn next to a blueprint camp.
-
-## Multiplayer
-
-Recipes, upgrade costs, chest loot, camp levels, camp storage weights, `EnableRecipes` and `VerboseLogging` are
-server-synced. Bag sizes, perks and the camp layout are read from each player's own config, so ship the same config
-with your modpack if you want every player's bags to match.
+- Settings are in `BepInEx/config/com.Fire.VA_Backpacks.cfg`. Things you might change: the open key, each bag's
+  size (rows and columns), bag perks, speed and whether it can go through portals, recipes, how often bags show up
+  in chests, and camp sizes.
+- On a server, recipes, chest loot and camp settings come from the server. Bag sizes and perks come from each
+  player's own config, so share the same config with your group if you want everyone's bags to match.
 
 ## Issues / questions
 
