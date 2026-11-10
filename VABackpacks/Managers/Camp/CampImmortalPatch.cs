@@ -89,7 +89,7 @@ namespace VerdantsAscent.Managers.Camp
         {
             var wnt = __instance != null ? __instance.GetComponent<WearNTear>() : null;
             if (wnt == null || !IsImmortal(wnt)) return true;
-            Debug.Log($"[VABackpacks] camp piece removed: {Utils.GetPrefabName(__instance.gameObject)} (a camp piece: no materials back; the next deploy places it fresh)");
+            VabLog.Line($"[VABackpacks] camp piece removed: {Utils.GetPrefabName(__instance.gameObject)} (a camp piece: no materials back; the next deploy places it fresh)");
             return false;
         }
     }

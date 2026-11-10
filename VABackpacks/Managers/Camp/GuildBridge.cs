@@ -59,7 +59,7 @@ namespace VerdantsAscent.Managers.Camp
                 IsAvailable = _areGuildmates != null;
 
                 if (IsAvailable)
-                    Debug.Log($"[VABackpacks] GuildBridge initialized via {apiType.Assembly.GetName().Name} — guildmates can access each other's camp chests.");
+                    VabLog.Line($"[VABackpacks] GuildBridge initialized via {apiType.Assembly.GetName().Name} — guildmates can access each other's camp chests.");
             }
             catch (Exception ex)
             {

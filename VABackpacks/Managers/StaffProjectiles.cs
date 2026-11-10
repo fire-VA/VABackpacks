@@ -74,19 +74,19 @@ namespace VerdantsAscent.Managers
                 if (proj != null) { proj.m_hitEffects = CloneEffects(proj.m_hitEffects, st.clone + "_hit", st.tint, st.size, ref fx); }
                 Clones[st.staff] = clone;
                 if (clone.GetComponent<ZNetView>() != null) Registered.Add(clone);
-                Debug.Log($"{MyMod.PluginName}: staff projectiles: FiresStaff_{st.staff} -> {st.clone} from '{used}'{(fallback ? $" (FALLBACK: '{st.sources[0]}' not found)" : "")}; tint {ColorUtility.ToHtmlStringRGB(st.tint)}, size x{st.size:0.##}, {tinted} part(s) tinted, {fx} hit effect(s) cloned");
+                VabLog.Line($"{MyMod.PluginName}: staff projectiles: FiresStaff_{st.staff} -> {st.clone} from '{used}'{(fallback ? $" (FALLBACK: '{st.sources[0]}' not found)" : "")}; tint {ColorUtility.ToHtmlStringRGB(st.tint)}, size x{st.size:0.##}, {tinted} part(s) tinted, {fx} hit effect(s) cloned");
             }
             // a fallback means a guessed name was wrong: list the real projectile prefabs once, so the next build can pick them
             if (anyFallback && !_listed)
             {
                 _listed = true;
                 var names = zs.m_prefabs.Where(p => p != null && p.GetComponent<Projectile>() != null).Select(p => p.name).OrderBy(n => n).ToArray();
-                Debug.Log($"{MyMod.PluginName}: staff projectiles: {names.Length} projectile prefab(s) in ZNetScene: {string.Join(", ", names)}");
+                VabLog.Line($"{MyMod.PluginName}: staff projectiles: {names.Length} projectile prefab(s) in ZNetScene: {string.Join(", ", names)}");
             }
             var named = (Dictionary<int, GameObject>)AccessTools.Field(typeof(ZNetScene), "m_namedPrefabs").GetValue(zs);
             foreach (var go in Registered)
                 if (go != null && zs.GetPrefab(go.name) == null) { zs.m_prefabs.Add(go); named[go.name.GetStableHashCode()] = go; }
-            Debug.Log($"{MyMod.PluginName}: staff projectiles: {Clones.Count}/{Styles.Length} built, {Registered.Count} registered in ZNetScene; mode {Mode?.Value ?? "Shared"}");
+            VabLog.Line($"{MyMod.PluginName}: staff projectiles: {Clones.Count}/{Styles.Length} built, {Registered.Count} registered in ZNetScene; mode {Mode?.Value ?? "Shared"}");
         }
 
         private static EffectList CloneEffects(EffectList src, string name, Color tint, float size, ref int count)
@@ -172,7 +172,7 @@ namespace VerdantsAscent.Managers
             foreach (var st in Styles)
             {
                 var item = db.GetItemPrefab("FiresStaff_" + st.staff);
-                if (item == null) { Debug.Log($"[EarlyMagic] {st.staff} held glow tint: no FiresStaff_{st.staff} item in this ObjectDB yet"); continue; }
+                if (item == null) { StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {st.staff} held glow tint: no FiresStaff_{st.staff} item in this ObjectDB yet"); continue; }
                 int ps = 0, lights = 0;
                 foreach (var p in item.GetComponentsInChildren<ParticleSystem>(true))
                 {
@@ -215,7 +215,7 @@ namespace VerdantsAscent.Managers
                     lights++;
                 }
                 int extra = HeldExtra(item, st.staff, st.tint, styled);
-                Debug.Log($"[EarlyMagic] {st.staff} held glow tint: #{ColorUtility.ToHtmlStringRGB(st.tint)} on {ps} particle system(s)/{lights} light(s); {extra} {(styled ? "Styled" : "Shared")} style system(s) on{(ps + lights == 0 ? " - NOTHING to tint on this prefab" : "")}");
+                StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {st.staff} held glow tint: #{ColorUtility.ToHtmlStringRGB(st.tint)} on {ps} particle system(s)/{lights} light(s); {extra} {(styled ? "Styled" : "Shared")} style system(s) on{(ps + lights == 0 ? " - NOTHING to tint on this prefab" : "")}");
             }
         }
 
@@ -244,7 +244,7 @@ namespace VerdantsAscent.Managers
                 foreach (Transform child in go.transform) UnityEngine.Object.Destroy(child.gameObject);   // only the one system
                 Shape(go.GetComponent<ParticleSystem>(), HeldKind.TryGetValue(staff, out var k) ? k : "halo", tint, src);
                 existing = go.transform;
-                Debug.Log($"{MyMod.PluginName}: staff held fx: FiresStaff_{staff} + {HeldFxName} '{(HeldKind.TryGetValue(staff, out var k2) ? k2 : "halo")}' cloned from '{src.gameObject.name}' under '{src.transform.parent?.name}'");
+                VabLog.Line($"{MyMod.PluginName}: staff held fx: FiresStaff_{staff} + {HeldFxName} '{(HeldKind.TryGetValue(staff, out var k2) ? k2 : "halo")}' cloned from '{src.gameObject.name}' under '{src.transform.parent?.name}'");
             }
             existing.gameObject.SetActive(styled);
             return styled ? 1 : 0;

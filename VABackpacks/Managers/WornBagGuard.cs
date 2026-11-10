@@ -39,7 +39,7 @@ namespace VerdantsAscent.Managers
                 {
                     foreach (var bag in gone)
                     {
-                        Debug.Log($"[VABackpacks] worn bag left the inventory without an unequip: {bag.m_dropPrefab?.name ?? bag.m_shared.m_name}; unequipping it (no ghost bag)");
+                        VabLog.Line($"[VABackpacks] worn bag left the inventory without an unequip: {bag.m_dropPrefab?.name ?? bag.m_shared.m_name}; unequipping it (no ghost bag)");
                         try { owner.UnequipItem(bag, false); }
                         catch (Exception ex) { Debug.LogWarning($"[VABackpacks] worn bag guard: unequip failed: {ex.Message}"); }
                         bag.m_equipped = false;

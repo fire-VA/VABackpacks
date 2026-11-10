@@ -71,9 +71,11 @@ namespace VerdantsAscent.Managers
             PerQuality = cfg.Bind(sec, "Per quality", 0.12f, "Damage added per quality level, as a share of the q1 damage. Server-synced.");
             MistileShare = cfg.Bind(sec, "Mistile share", 0.5f, "The homing Mistile (Bogfire, Sunfire) hits for this share of the bolt's damage, on top of the bolt. Server-synced.");
             foreach (var e in new[] { ElementalShare, BloodShare, PerQuality, MistileShare }) { sync?.AddConfigEntry(e); e.SettingChanged += (_, __) => ReapplyStaffs(); }
+            RenderedIcons = cfg.Bind("Early Magic", "Rendered staff icons", true, "Staff icons are rendered from each staff's own model (gem colour, 3/4 view) once at load. Off = the older drawn icons. Takes effect on the next game start.");
         }
 
         internal static ConfigEntry<float> ElementalShare, BloodShare, PerQuality, MistileShare;
+        internal static ConfigEntry<bool> RenderedIcons;
         private static readonly string[] TierNames = { "Meadows", "Black Forest", "Swamp", "Mountain", "Plains" };
         private static readonly string[] TierRefItem = { "Club", "SwordBronze", "SwordIron", "SwordSilver", "SwordBlackmetal" };
         private static readonly float[] TierRefFallback = { 12f, 35f, 55f, 105f, 95f };   // used only when the vanilla item is missing
@@ -127,10 +129,6 @@ namespace VerdantsAscent.Managers
                 float dmg = StaffDamage(db, s.id, s.skill, s.dmg, out string why);
                 sh.m_damages = Damage(s.element, dmg);
                 sh.m_damagesPerLevel = Damage(s.element, dmg * (PerQuality?.Value ?? 0.12f));
-                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{s.id} tier damage: {why}, +{PerQuality?.Value ?? 0.12f:0.##}/q");
-                // Each staff its OWN array
-                var icon = StaffIcon(s.id);
-                if (icon != null) sh.m_icons = new[] { icon };
                 var donor = s.element == "frost" ? shards ?? fireball : fireball;
                 if (sh.m_attack != null)
                 {
@@ -143,19 +141,36 @@ namespace VerdantsAscent.Managers
                     sh.m_attack.m_attackStamina = 6f;
                     StaffAttackStyles.Apply(sh, s.id, StaffProjectiles.Clone(s.id));   // Primary extras + the secondary (or back to plain when off)
                 }
-                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{s.id} damage q1 blunt {sh.m_damages.m_blunt:0.#} fire {sh.m_damages.m_fire:0.#} frost {sh.m_damages.m_frost:0.#} lightning {sh.m_damages.m_lightning:0.#} poison {sh.m_damages.m_poison:0.#} spirit {sh.m_damages.m_spirit:0.#} (+{sh.m_damagesPerLevel.GetTotalDamage():0.#}/q), skill {sh.m_skillType}");   // Per staff, at load
                 done++;
             }
-            Debug.Log($"{MyMod.PluginName}: early magic: {done}/{Staffs.Length} staff(s) set up (projectiles: fireball {(fireball?.m_attackProjectile != null)}, ice shards {(shards?.m_attackProjectile != null)})");
+            VabLog.Line($"{MyMod.PluginName}: early magic: {done}/{Staffs.Length} staff(s) set up (projectiles: fireball {(fireball?.m_attackProjectile != null)}, ice shards {(shards?.m_attackProjectile != null)})");
+        }
+
+        // The icons go on AFTER the held glow tint: the render lights the gem with the staff's own (tinted) light colour
+        private static void ApplyIcons(ObjectDB db)
+        {
+            foreach (var s in Staffs)
+            {
+                var sh = db.GetItemPrefab("FiresStaff_" + s.id)?.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
+                if (sh == null) continue;
+                var icon = StaffIcon(s.id, db.GetItemPrefab("FiresStaff_" + s.id));
+                if (icon != null) sh.m_icons = new[] { icon };   // Each staff its OWN array
+            }
         }
 
         // The staff icons (Resources\StaffIcons\item_Staff_<Name>.png,), loaded once; a missing one keeps the old icon
         private static readonly Dictionary<string, Sprite> Icons = new Dictionary<string, Sprite>();
-        private static Sprite StaffIcon(string id)
+        private static Sprite StaffIcon(string id, GameObject prefab)
         {
             if (Icons.TryGetValue(id, out var have)) return have;
-            // A headless server never draws an icon; no PNG decode there
+            // A headless server never draws an icon; no render or PNG decode there
             if (VerdantsAscent.Utilities.DedicatedStrip.Headless) { Icons[id] = null; return null; }
+            // Rendered from the staff's own model (its gem colours), once; the drawn PNG is the fallback
+            if (RenderedIcons == null || RenderedIcons.Value)
+            {
+                var r = StaffIconRender.Render(prefab, id);
+                if (r != null) { Icons[id] = r; return r; }
+            }
             Sprite s = null;
             try
             {
@@ -175,7 +190,7 @@ namespace VerdantsAscent.Managers
                             s.name = tex.name;
                         }
                     }
-                Debug.Log($"{MyMod.PluginName}: early magic: FiresStaff_{id} icon {(s != null ? $"{s.texture.width}x{s.texture.height} from {res}" : "MISSING (keeps the base staff's)")}");
+                VabLog.Line($"{MyMod.PluginName}: early magic: FiresStaff_{id} icon {(s != null ? $"{s.texture.width}x{s.texture.height} from {res}" : "MISSING (keeps the base staff's)")}");
             }
             catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic: FiresStaff_{id} icon failed: {e.Message}"); }
             Icons[id] = s;
@@ -194,9 +209,9 @@ namespace VerdantsAscent.Managers
         // [Early Magic] Staff Projectiles changed, or the clones were just built
         internal static void ReapplyStaffs()
         {
-            if (ObjectDB.instance == null) { Debug.Log($"{MyMod.PluginName}: early magic: re-apply skipped (ObjectDB not up yet; the ObjectDB hooks apply the staffs + held glow)"); return; }
+            if (ObjectDB.instance == null) { VabLog.Line($"{MyMod.PluginName}: early magic: re-apply skipped (ObjectDB not up yet; the ObjectDB hooks apply the staffs + held glow)"); return; }
             try { ApplyStaffData(ObjectDB.instance); StaffProjectiles.ApplyHeld(ObjectDB.instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic: staff re-apply failed: {e.Message}"); }
-            Debug.Log($"{MyMod.PluginName}: early magic: staff projectiles {(StaffProjectiles.Styled ? "Styled" : "Shared")}: " + string.Join(", ", Staffs.Select(s => s.id + "=" + (ObjectDB.instance.GetItemPrefab("FiresStaff_" + s.id)?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_attack?.m_attackProjectile?.name ?? "none")).ToArray()));
+            VabLog.Line($"{MyMod.PluginName}: early magic: staff projectiles {(StaffProjectiles.Styled ? "Styled" : "Shared")}: " + string.Join(", ", Staffs.Select(s => s.id + "=" + (ObjectDB.instance.GetItemPrefab("FiresStaff_" + s.id)?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_attack?.m_attackProjectile?.name ?? "none")).ToArray()));
         }
 
         private static HitData.DamageTypes Damage(string element, float v)
@@ -225,7 +240,7 @@ namespace VerdantsAscent.Managers
                 if (!FoodClones.TryGetValue(name, out var clone) || clone == null)
                 {
                     var donor = db.GetItemPrefab(f.donor);
-                    if (donor == null) { Debug.LogWarning($"{MyMod.PluginName}: early magic: no '{f.donor}' to make {name} from"); continue; }
+                    if (donor == null) { MyMod.Warn(db, $"{MyMod.PluginName}: early magic: no '{f.donor}' to make {name} from"); continue; }
                     clone = UnityEngine.Object.Instantiate(donor, _holder.transform, false);
                     clone.name = name;
                     var drop = clone.GetComponent<ItemDrop>();
@@ -267,7 +282,7 @@ namespace VerdantsAscent.Managers
                 var existing = db.m_recipes.FirstOrDefault(r => r != null && r.m_item == item);
                 if (existing != null) { if (!Made.Contains(existing)) Made.Add(existing); continue; }
                 var recipe = BackpackCraftingAndLoot.ParseRecipe(db, item, text, out string why);
-                if (recipe == null) { Debug.LogWarning($"{MyMod.PluginName}: early magic: no recipe for {prefab}: {why}"); continue; }
+                if (recipe == null) { MyMod.Warn(db, $"{MyMod.PluginName}: early magic: no recipe for {prefab}: {why}"); continue; }
                 if (prefab.StartsWith("FiresStaff_", StringComparison.Ordinal))
                     foreach (var r in recipe.m_resources) r.m_amountPerLevel = Mathf.Max(1, Mathf.CeilToInt(r.m_amount / 2f));   // §9.1: half the recipe per quality
                 db.m_recipes.Add(recipe);
@@ -280,7 +295,7 @@ namespace VerdantsAscent.Managers
         {
             bool on = Enabled != null && Enabled.Value;
             foreach (var r in Made) if (r != null) r.m_enabled = on;
-            Debug.Log($"{MyMod.PluginName}: early magic {(on ? "ON" : "OFF")}: {Made.Count(r => r != null)} recipe(s) {(on ? "craftable" : "hidden")} ([Early Magic] Enabled = {on})");
+            VabLog.Line($"{MyMod.PluginName}: early magic {(on ? "ON" : "OFF")}: {Made.Count(r => r != null)} recipe(s) {(on ? "craftable" : "hidden")} ([Early Magic] Enabled = {on})");
         }
 
         [HarmonyPatch(typeof(ObjectDB), "Awake")]
@@ -290,7 +305,7 @@ namespace VerdantsAscent.Managers
             private static void Postfix(ObjectDB __instance)
             {
                 if (__instance == null || __instance.m_items == null || __instance.m_items.Count == 0) return;
-                try { ApplyStaffData(__instance); MakeFoods(__instance); AddRecipes(__instance); HeldTint(__instance); }
+                try { ApplyStaffData(__instance); MakeFoods(__instance); AddRecipes(__instance); HeldTint(__instance); ApplyIcons(__instance); }
                 catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic setup failed: {e}"); }
             }
         }
@@ -301,7 +316,7 @@ namespace VerdantsAscent.Managers
             [HarmonyPriority(Priority.VeryLow)]
             private static void Postfix(ObjectDB __instance)
             {
-                try { ApplyStaffData(__instance); MakeFoods(__instance); HeldTint(__instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic (menu DB) failed: {e.Message}"); }
+                try { ApplyStaffData(__instance); MakeFoods(__instance); HeldTint(__instance); ApplyIcons(__instance); } catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: early magic (menu DB) failed: {e.Message}"); }
             }
         }
 

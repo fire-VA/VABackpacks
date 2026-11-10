@@ -158,7 +158,7 @@ namespace VerdantsAscent.Managers.Camp
                     var bp = ParseFile(path);
                     bp.Name = string.IsNullOrEmpty(bp.Name) ? blueprintName : bp.Name;
                     bp.SourcePath = path;
-                    Debug.Log($"[VABackpacks] Loaded blueprint '{bp.Name}' from {path} " +
+                    VabLog.Line($"[VABackpacks] Loaded blueprint '{bp.Name}' from {path} " +
                               $"({bp.Objects.Count} pieces, {bp.SnapPoints.Count} snap points)");
                     return bp;
                 }

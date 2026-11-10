@@ -135,7 +135,7 @@ namespace VerdantsAscent.Managers
             var named = (Dictionary<int, GameObject>)AccessTools.Field(typeof(ZNetScene), "m_namedPrefabs").GetValue(zs);
             foreach (var go in Registered)
                 if (go != null && zs.GetPrefab(go.name) == null) { zs.m_prefabs.Add(go); named[go.name.GetStableHashCode()] = go; }
-            Debug.Log($"{MyMod.PluginName}: staff attack styles: {Aoes.Count} AoE(s) built ({string.Join(", ", Aoes.Keys.ToArray())}), {Registered.Count} registered; ward bubble {(_wardBubble != null)}; mode {(On ? "ON" : "OFF")}");
+            VabLog.Line($"{MyMod.PluginName}: staff attack styles: {Aoes.Count} AoE(s) built ({string.Join(", ", Aoes.Keys.ToArray())}), {Registered.Count} registered; ward bubble {(_wardBubble != null)}; mode {(On ? "ON" : "OFF")}");
         }
 
         private static void MakeAoe(string key, GameObject donor, Def d, string kind, float radius, float ttl, float interval, float value)
@@ -210,7 +210,7 @@ namespace VerdantsAscent.Managers
             catch (Exception ex) { Debug.LogWarning($"{MyMod.PluginName}: staff attack styles: Solar Flare burst failed: {ex.Message}"); }
             var aoe = aoeGo.GetComponent<Aoe>();
             if (made > 0 && aoe != null) { aoe.m_ttl = Mathf.Max(aoe.m_ttl, 1.5f); aoe.m_hitInterval = Mathf.Max(aoe.m_hitInterval, 5f); }
-            Debug.Log($"{MyMod.PluginName}: staff attack styles: Solar Flare burst {(made > 0 ? $"= {names} x{Mathf.Max(1f, radius / FlareBurstBaseRadius):0.#} (radius {radius:0.#} m), AoE life {aoe?.m_ttl:0.#} s, one hit" : "NOT found (no StaffFireball hit effect) - the flare keeps its plain look")}");
+            VabLog.Line($"{MyMod.PluginName}: staff attack styles: Solar Flare burst {(made > 0 ? $"= {names} x{Mathf.Max(1f, radius / FlareBurstBaseRadius):0.#} (radius {radius:0.#} m), AoE life {aoe?.m_ttl:0.#} s, one hit" : "NOT found (no StaffFireball hit effect) - the flare keeps its plain look")}");
         }
 
         // ── heal over time: one SE_Stats per AoE, scaled by the caster's quality and skill (SetLevel) ───────────────────────
@@ -244,6 +244,7 @@ namespace VerdantsAscent.Managers
         private static readonly Dictionary<string, Attack> OrigSecondary = new Dictionary<string, Attack>();
         private static readonly Dictionary<string, string> OrigPrimaryAnim = new Dictionary<string, string>();
         private static readonly Dictionary<string, Attack.AttackType> OrigPrimaryType = new Dictionary<string, Attack.AttackType>();
+        private static readonly Dictionary<string, Attack> OrigPrimary = new Dictionary<string, Attack>();   // 1.0.142: the staff's own primary Attack (a borrowed vanilla clone replaces it while On)
         // The clone's OWN spawn-on-hit (the vanilla fireball's explosion etc.), kept so OFF restores the original exactly
         private static readonly Dictionary<string, GameObject> OrigSpawnOnHit = new Dictionary<string, GameObject>();
 
@@ -257,6 +258,19 @@ namespace VerdantsAscent.Managers
             var homing = projectile != null ? projectile.GetComponent<FiresStaffHoming>() : null;
             if (proj != null && !OrigSpawnOnHit.ContainsKey(staffId)) OrigSpawnOnHit[staffId] = proj.m_spawnOnHit;
             if (!OrigPrimaryType.ContainsKey(staffId) && sh.m_attack != null) OrigPrimaryType[staffId] = sh.m_attack.m_attackType;
+            if (!OrigPrimary.ContainsKey(staffId) && sh.m_attack != null) OrigPrimary[staffId] = sh.m_attack;
+            var incoming = sh.m_attack;
+            if (OrigPrimary.TryGetValue(staffId, out var ownAttack)) sh.m_attack = ownAttack;   // 1.0.142: always (re)built from the staff's own
+            // 1.0.146 (Fire 10-31: "staffs now do the correct animations but the primary lmb attack does not shoot a projectile anymore"; his log:
+            // "Start ran - staff_fireball, type Projectile, projectile 'NONE'", "ours kept: projectile 'none'"). EarlyMagic sets the styled
+            // projectile + costs on whatever sh.m_attack is - the previous borrowed clone - right before calling here; the own Attack was saved
+            // on the first pass, before the styled projectiles existed, so every rebuild cloned a NULL projectile. Carry them over first.
+            if (ownAttack != null && incoming != null && incoming != ownAttack)
+            {
+                if (incoming.m_attackProjectile != null) ownAttack.m_attackProjectile = incoming.m_attackProjectile;
+                ownAttack.m_attackEitr = incoming.m_attackEitr; ownAttack.m_attackStamina = incoming.m_attackStamina;
+            }
+            if (ownAttack != null && ownAttack.m_attackProjectile == null && projectile != null) ownAttack.m_attackProjectile = projectile;
             if (!On)
             {
                 sh.m_secondaryAttack = OrigSecondary[staffId];
@@ -271,21 +285,30 @@ namespace VerdantsAscent.Managers
             // vanilla item uses (ObjectDB, collected once); 'staff_frostorb' (Bogfire, Sunfire) and 'staff_thrust' (Moonsilver) are not
             // vanilla, so the trigger frame that spawns the projectile never came - those fall back to StaffFireball's own animation;
             // (2) a projectile primary IS a Projectile attack: the gem prefab's own type was kept before, and only the projectile was copied.
-            if (sh.m_attack != null)
-            {
-                string anim = d.PrimaryAnim;
-                if (!KnownAttackAnims().Contains(anim))
-                {
-                    string fallback = FireballAnim() ?? "staff_fireball";
-                    Debug.LogWarning($"{MyMod.PluginName}: staff attack styles: FiresStaff_{staffId}: primary animation '{anim}' is not one any vanilla item uses; using '{fallback}'");
-                    anim = fallback;
-                }
-                sh.m_attack.m_attackAnimation = anim;
-            }
+            // 1.0.140 (Fire 10-30, lead / [wishbone]: Sunfire / Bogfire 'staff_frostorb' and Moonsilver 'staff_thrust' never fired a bolt,
+            // "Start ran" 477x, "trigger frame" 0x): "known" was every ObjectDB item's attack animation, so a newly loaded mod item using
+            // staff_frostorb made it pass while the player's animator has no such trigger. The ObjectDB check is gone: the primary keeps its
+            // styled animation here, and Attack_Start_AnimatorCheck swaps it at Start for the fireball one when THIS character's animator
+            // controller has no trigger of that name (cached per controller). The ObjectDB list stays as a Debug line naming its sources.
+            // 1.0.144 (Fire 10-31: "its still doing the mmb attack with normal left click ... these were working recently, so find the regression"):
+            // up to 1.0.139 every staff's LMB played the one-hand 'staff_fireball' cast (the only staff animation vanilla items knew on the rig, so each
+            // PrimaryAnim fell back to it). 1.0.140-1.0.142 played the vanilla frost-staff 'staff_frostorb' / 'staff_thrust' casts instead (cloned from
+            // StaffFrostOrbs / StaffOrbofAhri): big two-handed casts that look like the MMB ring spell. Restored: every staff primary = staff_fireball.
+            string primAnim = FireballAnim() ?? "staff_fireball";
+            if (sh.m_attack != null) { sh.m_attack.m_attackAnimation = primAnim; if (d.PrimaryAnim != primAnim) StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: FiresStaff_{staffId}: primary plays '{primAnim}' (as up to 1.0.139), not '{d.PrimaryAnim}'"); }
+            KnownAttackAnims();
             // the Mistile staffs fire no projectile: the trigger frame spawns the Mistile (Attack_OnAttackTrigger)
             // The Mistile
             // staffs (Bogfire, Sunfire) fire their normal styled bolt too; the Mistile is spawned where it hits (Projectile_OnHit)
             if (sh.m_attack != null) sh.m_attack.m_attackType = Attack.AttackType.Projectile;
+            // 1.0.142 (Fire 10-30, no band-aids; 1.0.140's live log: the animator HAS 'staff_frostorb', yet "Start ran" x70, "trigger frame"
+            // x0): an animation is driven by its item's whole Attack (hold / loop / chain / speed / timing), not the trigger name alone. A
+            // borrowed vanilla animation now runs on a CLONE of the vanilla owner's Attack (Attack.Clone), with only ours put back: the
+            // projectile, its count / speed / spread / bursts, and the eitr / stamina / health cost. Damage stays on the item (m_damages).
+            // 1.0.144: staff_fireball runs on a CLONE of vanilla StaffFireball's own Attack (the 1.0.142 mechanism, proven to reach the trigger frame:
+            // Fire's 1.0.143 log "trigger frame - staff_frostorb" + damage); our own Attack alone has no proof of a trigger on the rig (chain
+            // levels 2 vs vanilla 0 etc., the 1.0.142 diff), and that is how 1.0.139's staffs stopped firing
+            if (sh.m_attack != null) sh.m_attack = BorrowVanillaAttack("FiresStaff_" + staffId, sh.m_attack);
             if (proj != null) proj.m_spawnOnHit = !string.IsNullOrEmpty(d.HitAoe) && Aoes.TryGetValue(d.Staff + "_hit", out var hitAoe) ? hitAoe : OrigSpawnOnHit[staffId];
             if (projectile != null && d.Homing > 0f)
             {
@@ -294,16 +317,23 @@ namespace VerdantsAscent.Managers
                 homing.enabled = true;
             }
             sh.m_secondaryAttack = MakeSecondary(sh, d, projectile);
-            Debug.Log($"{MyMod.PluginName}: staff attack styles: FiresStaff_{staffId}: primary '{d.PrimaryAnim}'{(d.Homing > 0f ? $", homing {d.Homing:0}/s" : "")}{(d.Chain ? ", chain" : "")}{(d.Drain ? ", drain 20%" : "")}{(d.MendEvery3 ? ", mend every 3rd" : "")}{(proj?.m_spawnOnHit != null ? ", on hit " + proj.m_spawnOnHit.name : "")}; "
-                + $"secondary {d.Secondary} '{d.SecAnim}'{(d.TwoStep ? " (two-step ring)" : d.SelfCentred ? " (at your feet)" : "")}, {d.Eitr:0} eitr, {d.Cooldown:0} s cooldown");
         }
 
         // Every attack animation a vanilla item's primary or secondary uses (ObjectDB, once, after it is populated)
+        // 1.0.133: keyed by the ObjectDB and its item count. It was collected once, on the early partial pass (2 animations), so the
+        // full pass refused vanilla's staff_lightningshot / staff_rapidfire and every such staff swung the fireball.
         private static HashSet<string> s_knownAnims;
+        private static ObjectDB s_knownDb;
+        private static int s_knownCount = -1;
         private static HashSet<string> KnownAttackAnims()
         {
-            if (s_knownAnims != null && s_knownAnims.Count > 0) return s_knownAnims;
+            var cur = ObjectDB.instance;
+            int count = cur != null && cur.m_items != null ? cur.m_items.Count : -1;
+            if (s_knownAnims != null && s_knownAnims.Count > 0 && s_knownDb == cur && s_knownCount == count) return s_knownAnims;
+            s_knownDb = cur; s_knownCount = count;
             var set = new HashSet<string>(StringComparer.Ordinal);
+            var from = new Dictionary<string, List<string>>(StringComparer.Ordinal);   // 1.0.140: which items bring each staff animation
+            void Add(string a, string item) { if (string.IsNullOrEmpty(a)) return; set.Add(a); if (a.StartsWith("staff", StringComparison.Ordinal)) { if (!from.TryGetValue(a, out var l)) from[a] = l = new List<string>(); if (l.Count < 6) l.Add(item); } }
             var db = ObjectDB.instance;
             if (db != null && db.m_items != null)
                 foreach (var go in db.m_items)
@@ -311,17 +341,129 @@ namespace VerdantsAscent.Managers
                     if (go == null || go.name.StartsWith("FiresStaff_", StringComparison.Ordinal)) continue;
                     var s = go.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
                     if (s == null) continue;
-                    if (!string.IsNullOrEmpty(s.m_attack?.m_attackAnimation)) set.Add(s.m_attack.m_attackAnimation);
-                    if (!string.IsNullOrEmpty(s.m_secondaryAttack?.m_attackAnimation)) set.Add(s.m_secondaryAttack.m_attackAnimation);
+                    Add(s.m_attack?.m_attackAnimation, go.name);
+                    Add(s.m_secondaryAttack?.m_attackAnimation, go.name);
                 }
             if (set.Count > 0)
             {
                 s_knownAnims = set;
-                Debug.Log($"{MyMod.PluginName}: staff attack styles: {set.Count} vanilla attack animation(s) known; staff ones: {string.Join(", ", set.Where(n => n.StartsWith("staff", StringComparison.Ordinal)).OrderBy(n => n).ToArray())}");
+                // 1.0.140: report only (no longer decides anything): the ObjectDB items using each staff animation
+                StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: ObjectDB items' staff animations (report only; the player's animator decides): {string.Join("; ", from.OrderBy(k => k.Key).Select(k => $"{k.Key} <- {string.Join(", ", k.Value.ToArray())}").ToArray())}");
             }
             return set;
         }
         private static string FireballAnim() => ObjectDB.instance?.GetItemPrefab("StaffFireball")?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_attack?.m_attackAnimation;
+
+        // 1.0.140: an attack animation is a TRIGGER on the character's animator (Attack.Start -> ZSyncAnimation.SetTrigger). "Known" = the
+        // trigger exists on THIS character's animator controller; the trigger names are read once per controller.
+        internal static readonly BepInEx.Logging.ManualLogSource StaffLog = BepInEx.Logging.Logger.CreateLogSource("VABackpacks.Staffs");
+        private static readonly AccessTools.FieldRef<Character, Animator> s_animator = AccessTools.FieldRefAccess<Character, Animator>("m_animator");
+        private static readonly Dictionary<RuntimeAnimatorController, HashSet<string>> s_triggers = new Dictionary<RuntimeAnimatorController, HashSet<string>>();
+        private static readonly HashSet<string> s_saidStaff = new HashSet<string>(StringComparer.Ordinal);
+        private static bool s_infoSaid;
+
+        private static bool AnimatorHasTrigger(Humanoid who, string trigger, out bool known)
+        {
+            known = false;
+            var an = who != null ? s_animator(who) : null;
+            var ctl = an != null ? an.runtimeAnimatorController : null;
+            if (ctl == null) return false;
+            if (!s_triggers.TryGetValue(ctl, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var p in an.parameters) if (p.type == AnimatorControllerParameterType.Trigger) set.Add(p.name);
+                if (set.Count == 0) return false;   // parameters not readable yet (inactive animator): decide next time
+                s_triggers[ctl] = set;
+                StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: animator '{ctl.name}' has {set.Count} trigger(s); staff ones: {string.Join(", ", set.Where(n => n.StartsWith("staff", StringComparison.Ordinal)).OrderBy(n => n).ToArray())}");
+            }
+            known = true;
+            return set.Contains(trigger);
+        }
+
+        // 1.0.141: once per borrowed animation, every simple Attack field where the vanilla item that owns the animation differs from ours
+        // (the cause of "Start ran, no trigger frame": hold / loop / chain / speed settings the animation expects)
+        private static readonly HashSet<string> s_diffed = new HashSet<string>(StringComparer.Ordinal);
+        // the item (not a FiresStaff) whose primary or secondary uses this animation: the one the animation was made for
+        private static Attack VanillaOwner(string anim, out string vanName)
+        {
+            vanName = null;
+            if (ObjectDB.instance == null) return null;
+            // 1.0.144: the vanilla item first (StaffFireball owns staff_fireball), never another mod's staff that borrowed the same clip
+            var vf = ObjectDB.instance.GetItemPrefab("StaffFireball")?.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
+            if (vf?.m_attack != null && vf.m_attack.m_attackAnimation == anim) { vanName = "StaffFireball"; return vf.m_attack; }
+            foreach (var go in ObjectDB.instance.m_items)
+            {
+                if (go == null || go.name.StartsWith("FiresStaff_", StringComparison.Ordinal)) continue;
+                var s = go.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
+                if (s?.m_attack != null && s.m_attack.m_attackAnimation == anim) { vanName = go.name; return s.m_attack; }
+                if (s?.m_secondaryAttack != null && s.m_secondaryAttack.m_attackAnimation == anim) { vanName = go.name + " (secondary)"; return s.m_secondaryAttack; }
+            }
+            return null;
+        }
+
+        private static Attack BorrowVanillaAttack(string staff, Attack ours)
+        {
+            string anim = ours.m_attackAnimation;
+            var van = VanillaOwner(anim, out string vanName);
+            if (van == null) { StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: {staff}: no item owns '{anim}'; its own Attack is kept"); return ours; }
+            DiffVanillaAttack(anim, ours);
+            var c = van.Clone();
+            c.m_attackAnimation = anim;
+            c.m_attackProjectile = ours.m_attackProjectile;
+            c.m_projectiles = ours.m_projectiles; c.m_projectileBursts = ours.m_projectileBursts; c.m_burstInterval = ours.m_burstInterval;
+            c.m_projectileVel = ours.m_projectileVel; c.m_projectileVelMin = ours.m_projectileVelMin;
+            c.m_projectileAccuracy = ours.m_projectileAccuracy; c.m_projectileAccuracyMin = ours.m_projectileAccuracyMin;
+            c.m_attackEitr = ours.m_attackEitr; c.m_attackStamina = ours.m_attackStamina;
+            c.m_attackHealth = ours.m_attackHealth; c.m_attackHealthPercentage = ours.m_attackHealthPercentage;
+            c.m_spawnOnHit = ours.m_spawnOnHit; c.m_spawnOnHitChance = ours.m_spawnOnHitChance;
+            return c;
+        }
+
+        private static void DiffVanillaAttack(string anim, Attack ours)
+        {
+            if (!s_diffed.Add(anim)) return;
+            var van = VanillaOwner(anim, out string vanName);
+            if (van == null) { StaffLog.LogDebug($"{MyMod.PluginName}: staff attack diff: no vanilla item uses '{anim}'"); return; }
+            var diffs = new List<string>();
+            foreach (var f in typeof(Attack).GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                var t = f.FieldType;
+                if (!(t.IsPrimitive || t.IsEnum || t == typeof(string))) continue;
+                object a = f.GetValue(van), b = f.GetValue(ours);
+                if (!Equals(a, b)) diffs.Add($"{f.Name} vanilla {a} / ours {b}");
+            }
+            StaffLog.LogDebug($"{MyMod.PluginName}: staff attack diff '{anim}' vs {vanName}: {(diffs.Count > 0 ? string.Join("; ", diffs.ToArray()) : "no simple field differs")}");
+        }
+
+        [HarmonyPatch(typeof(Attack), nameof(Attack.Start))]
+        private static class Attack_Start_AnimatorCheck
+        {
+            [HarmonyPriority(Priority.First)]
+            private static void Prefix(Attack __instance, Humanoid character, ItemDrop.ItemData weapon)
+            {
+                try
+                {
+                    var name = weapon?.m_dropPrefab != null ? weapon.m_dropPrefab.name : null;
+                    if (name == null || !name.StartsWith("FiresStaff_", StringComparison.Ordinal) || string.IsNullOrEmpty(__instance.m_attackAnimation)) return;
+                    string anim = __instance.m_attackAnimation;
+                    // a staff animation the character's animator has no trigger for at all still falls back (1.0.140); one it HAS runs with
+                    // the vanilla owner's whole Attack setup, cloned at setup (1.0.142, BorrowVanillaAttack)
+                    bool has = AnimatorHasTrigger(character, anim, out bool known);
+                    if (!known || has)
+                    {
+                        if (known && s_saidStaff.Add(name + "|" + anim)) StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: {name} uses '{anim}' (the animator has it)");
+                        return;
+                    }
+                    string fallback = FireballAnim() ?? "staff_fireball";
+                    __instance.m_attackAnimation = fallback;   // this attack (a copy of the shared one)
+                    if (weapon.m_shared.m_attack != null && weapon.m_shared.m_attack.m_attackAnimation == anim) weapon.m_shared.m_attack.m_attackAnimation = fallback;   // the primary from now on
+                    if (weapon.m_shared.m_secondaryAttack != null && weapon.m_shared.m_secondaryAttack.m_attackAnimation == anim) weapon.m_shared.m_secondaryAttack.m_attackAnimation = fallback;
+                    if (s_saidStaff.Add(name + "|" + anim)) StaffLog.LogDebug($"{MyMod.PluginName}: staff attack styles: {name}: '{anim}' is not a trigger on this character's animator; uses '{fallback}'");
+                    if (!s_infoSaid) { s_infoSaid = true; VabLog.Line($"{MyMod.PluginName}: staff attack styles: staffs whose animation the player's animator lacks now use '{fallback}' (first: {name} '{anim}')"); }
+                }
+                catch (Exception e) { StaffLog.LogDebug($"{MyMod.PluginName}: staff animator check skipped: {e.Message}"); }
+            }
+        }
 
         // The point-of-use line for a gem staff's PRIMARY when it starts
         [HarmonyPatch(typeof(Attack), nameof(Attack.Start))]
@@ -333,7 +475,7 @@ namespace VerdantsAscent.Managers
                 if (who == null || who != Player.m_localPlayer) return;
                 var w = Traverse.Create(__instance).Field("m_weapon").GetValue<ItemDrop.ItemData>();
                 if (w?.m_dropPrefab == null || !w.m_dropPrefab.name.StartsWith("FiresStaff_", StringComparison.Ordinal) || (w.m_shared.m_secondaryAttack != null && __instance.m_attackAnimation == w.m_shared.m_secondaryAttack.m_attackAnimation && __instance.m_attackAnimation != w.m_shared.m_attack?.m_attackAnimation)) return;
-                Debug.Log($"[EarlyMagic] {w.m_dropPrefab.name.Substring("FiresStaff_".Length)} primary: Start {(__result ? "ran" : "REFUSED")} - animation '{__instance.m_attackAnimation}', type {__instance.m_attackType}, projectile '{(__instance.m_attackProjectile != null ? __instance.m_attackProjectile.name : "NONE")}'");
+                StaffLog.LogDebug($"[EarlyMagic] {w.m_dropPrefab.name.Substring("FiresStaff_".Length)} {(_lastWasSecondary ? "secondary cast" : "primary")}: Start {(__result ? "ran" : "REFUSED")} - animation '{__instance.m_attackAnimation}', type {__instance.m_attackType}, projectile '{(__instance.m_attackProjectile != null ? __instance.m_attackProjectile.name : "NONE")}'");
             }
         }
 
@@ -423,27 +565,16 @@ namespace VerdantsAscent.Managers
                 // later, cast it (no selection seen); and right after a cast the still-held button re-entered the aim. A two-step staff now
                 // needs the button RELEASED between steps: the press that opens the aim (or casts) must be let go before the next one counts.
                 _prefixFrame = Time.frameCount;
-                if (d.TwoStep && _needRelease)
+                // 1.0.143 (Fire 10-31: "i think were triggering the secondary attack with normal lmb now?"; his log: one MMB left the
+                // staff AIMING, every later MMB only re-aimed and the next LMB cast the secondary). Now: LMB is ALWAYS the primary (and
+                // cancels an open aim); HOLD MMB = the ring follows your aim, RELEASE MMB = cast (Player_Update below calls back here with
+                // s_castOnRelease); nothing stays aiming after the button is up.
+                if (d.TwoStep && !secondaryAttack && _aimingStaff == staff) { LogAim(staff, "LMB while holding MMB -> aim cancelled, primary"); StopAiming(true); }
+                if (d.TwoStep && secondaryAttack && _aimingStaff == staff && !s_castOnRelease)
                 {
-                    if (_aimingStaff == staff || secondaryAttack) { LogAim(staff, $"StartAttack({(secondaryAttack ? "secondary" : "primary")}) ignored: the press that {_releaseFor} is still held"); __result = false; return false; }
+                    __result = false; return false;   // vanilla repeats StartAttack(secondary) every frame MMB is held: still aiming
                 }
-                // Vanilla re-sends its own queued attack from the held press (StartAttack(secondary) again the frame after the
-                // release), which used to cast at once: while aiming, only a
-                // NEW press (a button DOWN seen after the release) casts; anything else vanilla sends is ignored
-                // While aiming,
-                // the middle button never casts (the ring already follows your aim); only a fresh LEFT click does
-                if (d.TwoStep && _aimingStaff == staff && secondaryAttack)
-                {
-                    LogAim(staff, "StartAttack(secondary) while aiming: MMB only aims - left click casts at the ring");
-                    __result = false; return false;
-                }
-                if (d.TwoStep && _aimingStaff == staff && !_freshPress)
-                {
-                    LogAim(staff, $"StartAttack({(secondaryAttack ? "secondary" : "primary")}) ignored while aiming: no new press since the aim opened (vanilla's queued / repeated attack)");
-                    __result = false; return false;
-                }
-                if (!secondaryAttack && d.TwoStep && _aimingStaff == staff) { LogAim(staff, $"the attack click (LMB) places the aimed {d.Secondary}"); secondaryAttack = true; }
-                if (!secondaryAttack) { _lastWasSecondary = false; _castPoint = null; return true; }
+                if (!secondaryAttack) { _lastWasSecondary = false; _castPoint = null; if (d.TwoStep) LogAim(staff, "LMB -> primary"); return true; }
                 if (d.TwoStep) LogAim(staff, $"StartAttack(secondary) - state {(_aimingStaff == staff ? "AIMING" : "idle")}, eitr {(__instance as Player)?.GetEitr() ?? 0f:0.#}/{d.Eitr:0}, cooldown {(ReadyAt.TryGetValue(staff, out float rdy) ? Mathf.Max(0f, rdy - Time.time) : 0f):0.0} s, aim valid {_aimValid}");
                 if (ReadyAt.TryGetValue(staff, out float at) && Time.time < at)
                 {
@@ -461,7 +592,7 @@ namespace VerdantsAscent.Managers
                 {
                     pl.Message(MessageHud.MessageType.Center, "$hud_eitrrequired");
                     try { Hud.instance?.EitrBarEmptyFlash(); } catch { }
-                    Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} refused - eitr {pl.GetEitr():0.#}/{pl.GetMaxEitr():0.#}, needs {d.Eitr:0}");
+                    StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} refused - eitr {pl.GetEitr():0.#}/{pl.GetMaxEitr():0.#}, needs {d.Eitr:0}");
                     __result = false; return false;
                 }
                 if (d.TwoStep)
@@ -469,19 +600,16 @@ namespace VerdantsAscent.Managers
                     if (_aimingStaff != staff)
                     {
                         _aimingStaff = staff;
-                        _needRelease = true; _releaseFor = "opened the aim"; _freshPress = false;
                         _aimHitLogged = null;
                         AimClip.Play(__instance, "fires.staff.cast.hold");   // The aiming pose while the ghost ring is up (no attack runs now)
-                        Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} aiming - the ring follows your aim; LEFT click casts at it; right click / block / Escape cancels");
-                        __instance.Message(MessageHud.MessageType.TopLeft, $"{d.Secondary}: aim the ring, LEFT click to cast (right click cancels)");
+                        LogAim(staff, $"MMB held -> aiming {d.Secondary} (release MMB casts; LMB / block / Escape / right click cancels)");
+                        __instance.Message(MessageHud.MessageType.TopLeft, $"{d.Secondary}: hold to aim, release to cast");
                         __result = false; return false;
                     }
-                    // The ring always stands on a reachable ground spot (the aim ray's hit, else the ground at range), so a click there casts;
-                    // "Can't place it there" refused clicks while the ring was plainly drawn
+                    // The ring always stands on a reachable ground spot (the aim ray's hit, else the ground at range), so the release casts there
                     _castPoint = _aimPoint;
                     StopAiming(false);
-                    _needRelease = true; _releaseFor = "cast"; _freshPress = false;
-                    LogAim(staff, $"CAST at {_castPoint.Value:F1}");
+                    LogAim(staff, $"MMB released -> secondary CAST at {_castPoint.Value:F1}");
                 }
                 else _castPoint = null;
                 _lastWasSecondary = true;
@@ -500,7 +628,7 @@ namespace VerdantsAscent.Managers
                 if (d.Secondary == Sec.Fan) { _fanHoldUntil = Time.time + FanHoldSeconds; _fanYaw0 = __instance.transform.eulerAngles.y; _fanYawLogged = false; }
                 // The secondary's eitr is spent here, once, when the attack really started (its Attack carries 0 for vanilla)
                 if (__instance is Player sp && d.Eitr > 0f) sp.UseEitr(d.Eitr);
-                Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} cast ('{d.SecAnim}', {d.Eitr:0} eitr spent, {(__instance as Player)?.GetEitr() ?? 0f:0.#} left){(_castPoint.HasValue ? $" at {_castPoint.Value:F1}" : "")}; next in {d.Cooldown:0} s");
+                StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} cast ('{d.SecAnim}', {d.Eitr:0} eitr spent, {(__instance as Player)?.GetEitr() ?? 0f:0.#} left){(_castPoint.HasValue ? $" at {_castPoint.Value:F1}" : "")}; next in {d.Cooldown:0} s");
                 SecClip.Begin(__instance, staff, d);   // The matching UAL clip (key off = nothing)
             }
         }
@@ -530,13 +658,13 @@ namespace VerdantsAscent.Managers
             {
                 if (_fanYawLogged || __instance != Player.m_localPlayer || Time.time < _fanHoldUntil) return;
                 _fanYawLogged = true;
-                Debug.Log($"[EarlyMagic] EmberWand secondary: Fan cast - the body turned {Mathf.Abs(Mathf.DeltaAngle(_fanYaw0, __instance.transform.eulerAngles.y)):0.#} deg over the cast (facing held, fired from the left hand)");
+                StaffLog.LogDebug($"[EarlyMagic] EmberWand secondary: Fan cast - the body turned {Mathf.Abs(Mathf.DeltaAngle(_fanYaw0, __instance.transform.eulerAngles.y)):0.#} deg over the cast (facing held, fired from the left hand)");
             }
         }
 
         private static void StopAiming(bool cancelled)
         {
-            if (_aimingStaff != null && cancelled) Debug.Log($"[EarlyMagic] {_aimingStaff} secondary: aiming cancelled");
+            if (_aimingStaff != null && cancelled) StaffLog.LogDebug($"[EarlyMagic] {_aimingStaff} secondary: aiming cancelled");
             _aimingStaff = null;
             AimClip.Stop(Player.m_localPlayer);
             ReleaseGhost();
@@ -557,6 +685,17 @@ namespace VerdantsAscent.Managers
                     : Input.GetMouseButtonDown(1) ? "right click" : __instance.IsDead() ? "dead" : null;
                 if (why != null) { LogAim(_aimingStaff, "cancel: " + why); StopAiming(true); return; }
                 var d = DefOf(_aimingStaff);
+                // 1.0.143: MMB (or the game's SecondaryAttack button) let go while aiming = cast at the ring, through StartAttack (eitr /
+                // cooldown / cast path unchanged); a refused cast (eitr) closes the aim, so nothing stays aiming
+                if (!Input.GetMouseButton(2) && !ZInput.GetButton("SecondaryAttack") && !ZInput.GetButton("JoySecondaryAttack"))
+                {
+                    _aimValid = AimPoint(__instance, AimRange, out _aimPoint);
+                    string aimed = _aimingStaff; bool ok;
+                    s_castOnRelease = true;
+                    try { ok = __instance.StartAttack(null, true); } finally { s_castOnRelease = false; }
+                    if (_aimingStaff != null) { LogAim(aimed, $"MMB released -> not cast ({(ok ? "?" : "refused: eitr / cooldown / busy")}): aim closed"); StopAiming(true); }
+                    return;
+                }
                 _aimValid = AimPoint(__instance, AimRange, out _aimPoint);
                 ShowGhost(_aimPoint, d.Radius, _aimValid, __instance);
             }
@@ -564,7 +703,7 @@ namespace VerdantsAscent.Managers
 
         // One line per mouse press / release while a
         // two-step staff is in hand - the state, whether the release gate is up, and whether vanilla's StartAttack saw the press (2 frames)
-        private static bool _needRelease, _freshPress; private static string _releaseFor = "";
+        private static bool _needRelease, _freshPress, s_castOnRelease; private static string _releaseFor = "";
         private static int _prefixFrame = -10, _pendingPressFrame = -1; private static string _pendingPress;
         private static void InputLog(Player p, string staff)
         {
@@ -573,7 +712,6 @@ namespace VerdantsAscent.Managers
             {
                 // The game's own "Attack" button (a rebound key, a gamepad) must count too, not
                 // only the raw left mouse button: the cast press is LMB OR vanilla's "Attack" button going down
-                if (btn == 0 && (Input.GetMouseButtonDown(btn) || ZInput.GetButtonDown("Attack") || ZInput.GetButtonDown("JoyAttack")) && _aimingStaff != null && !_needRelease && !_freshPress) { _freshPress = true; LogAim(staff, $"input {name}: a NEW press while aiming - the next StartAttack casts"); }   // LMB only casts
                 if (Input.GetMouseButtonDown(btn)) { LogAim(staff, $"input {name} DOWN - state {(_aimingStaff != null ? "AIMING" : "idle")}, release gate {(_needRelease ? "UP (" + _releaseFor + ")" : "down")}, in attack {p.InAttack()}, blocking {p.IsBlocking()}, UI {(InventoryGui.IsVisible() || Menu.IsVisible() || TextInput.IsVisible() || Minimap.IsOpen())}"); _pendingPress = name; _pendingPressFrame = Time.frameCount; }
                 if (Input.GetMouseButtonUp(btn)) LogAim(staff, $"input {name} up - state {(_aimingStaff != null ? "AIMING" : "idle")}");
             }
@@ -583,7 +721,7 @@ namespace VerdantsAscent.Managers
                 _pendingPress = null;
             }
         }
-        private static void LogAim(string staff, string what) => Debug.Log($"[EarlyMagic] {staff} aim: {what} (frame {Time.frameCount})");
+        private static void LogAim(string staff, string what) => StaffLog.LogDebug($"[EarlyMagic] {staff} aim: {what} (frame {Time.frameCount})");
 
         private static bool AimPoint(Player p, float range, out Vector3 point)
         {
@@ -602,7 +740,7 @@ namespace VerdantsAscent.Managers
                 if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(point, out float ground)) point.y = ground;
             }
             string src = hitOk ? $"ray hit '{hit.collider.name}' layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}" : $"no ground/floor hit within {range:0} m: ground at range";
-            if (src != _aimHitLogged) { _aimHitLogged = src; Debug.Log($"[EarlyMagic] {_aimingStaff} aim point: {src} at {point:F1} (mask terrain+piece = {mask}); the ring's ground under it = Core GroundHeightSampler (layers terrain, static_solid, Default, Default_small, piece)"); }
+            if (src != _aimHitLogged) { _aimHitLogged = src; StaffLog.LogDebug($"[EarlyMagic] {_aimingStaff} aim point: {src} at {point:F1} (mask terrain+piece = {mask}); the ring's ground under it = Core GroundHeightSampler (layers terrain, static_solid, Default, Default_small, piece)"); }
             return true;   // the ring always marks a reachable ground spot, so a click there casts
         }
         private static string _aimHitLogged;
@@ -624,7 +762,7 @@ namespace VerdantsAscent.Managers
                     _show = mgr.GetMethod("Show", new[] { _kindType, typeof(Vector3), typeof(float), typeof(float), typeof(Character), typeof(bool) });
                     _release = mgr.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => m.Name == "Release" && m.GetParameters().Length == 1);
                 }
-                Debug.Log($"{MyMod.PluginName}: staff attack styles: ghost ring {(_show != null ? "Core GroundRingManager" : "not available (Core missing or older): aiming works without a ring")}");
+                VabLog.Line($"{MyMod.PluginName}: staff attack styles: ghost ring {(_show != null ? "Core GroundRingManager" : "not available (Core missing or older): aiming works without a ring")}");
             }
             if (_show == null) return;
             // the ring was released and re-shown EVERY frame (Core logged the first one, then each new ring was gone before it drew). Now it is
@@ -645,12 +783,12 @@ namespace VerdantsAscent.Managers
                 _ghostStartTime = _ghost != null && _ringStart != null ? (float)_ringStart.GetValue(_ghost, null) : -1f;
                 var rgo = (_ghost as Component)?.gameObject;
                 int rn = rgo != null ? rgo.GetComponentsInChildren<Renderer>(true).Length : 0, rv = rgo != null ? rgo.GetComponentsInChildren<Renderer>(false).Count(r => r.enabled) : 0;
-                Debug.Log($"[EarlyMagic] {_aimingStaff} aim ring: {(_ghost != null ? $"shown ({want} disc, radius {radius:0.#} m) at {at:F1}, active {rgo != null && rgo.activeInHierarchy}, renderers {rv}/{rn} enabled" : "NOT shown (Core returned no ring)")}");
+                StaffLog.LogDebug($"[EarlyMagic] {_aimingStaff} aim ring: {(_ghost != null ? $"shown ({want} disc, radius {radius:0.#} m) at {at:F1}, active {rgo != null && rgo.activeInHierarchy}, renderers {rv}/{rn} enabled" : "NOT shown (Core returned no ring)")}");
                 if (_ghost != null) GroundOnlyRing(_ghost, at);
                 if (_ghost != null && !_ghostSaid)
                 {
                     _ghostSaid = true;
-                    Debug.Log($"[EarlyMagic] ghost ring shown once per aim and moved each frame: Core returned {_ghost.GetType().Name}, movable {GhostMovable(_ghost)}");
+                    StaffLog.LogDebug($"[EarlyMagic] ghost ring shown once per aim and moved each frame: Core returned {_ghost.GetType().Name}, movable {GhostMovable(_ghost)}");
                 }
                 // Core's Show returns null WITHOUT a throw when its ring can't draw (GroundRingSegmentSource not available, or the
                 // visibility rule says no) - said once per session, with the segment source's state
@@ -706,7 +844,7 @@ namespace VerdantsAscent.Managers
             _ringApiLooked = true;
             _ringSetCenter = AccessTools.Method(g.GetType(), "SetCenter", new[] { typeof(Vector3) });
             _ringGroundOnly = AccessTools.Property(g.GetType(), "GroundOnly");
-            Debug.Log($"[EarlyMagic] ghost ring API: SetCenter {(_ringSetCenter != null ? "yes" : "no (Core < 0.2.722: private centre)")}, GroundOnly {(_ringGroundOnly != null ? "yes - the disc samples terrain + floors only" : "no (Core < 0.2.722: the disc drapes over rocks/trees)")}");
+            StaffLog.LogDebug($"[EarlyMagic] ghost ring API: SetCenter {(_ringSetCenter != null ? "yes" : "no (Core < 0.2.722: private centre)")}, GroundOnly {(_ringGroundOnly != null ? "yes - the disc samples terrain + floors only" : "no (Core < 0.2.722: the disc drapes over rocks/trees)")}");
         }
         private static void GroundOnlyRing(object g, Vector3 at)
         {
@@ -724,7 +862,7 @@ namespace VerdantsAscent.Managers
             // drop it WITHOUT releasing and show a fresh one.
             if (g is Component rc && (!rc.gameObject.activeInHierarchy || (_ringStart != null && !Mathf.Approximately((float)_ringStart.GetValue(g, null), _ghostStartTime))))
             {
-                Debug.Log($"[EarlyMagic] {_aimingStaff} aim ring: Core took it back (ring cap / pool: {(rc.gameObject.activeInHierarchy ? "restarted for another effect" : "released")}); showing a fresh one");
+                StaffLog.LogDebug($"[EarlyMagic] {_aimingStaff} aim ring: Core took it back (ring cap / pool: {(rc.gameObject.activeInHierarchy ? "restarted for another effect" : "released")}); showing a fresh one");
                 _ghost = null; _ghostKind = null;
                 return false;
             }
@@ -758,24 +896,24 @@ namespace VerdantsAscent.Managers
                 string staff = StaffOf(who);
                 var d = DefOf(staff);
                 if (d == null) return;
-                if (!_lastWasSecondary)   // The primary's trigger frame (the projectile spawns here)
-                    Debug.Log($"[EarlyMagic] {staff} primary: trigger frame - animation '{__instance.m_attackAnimation}', type {__instance.m_attackType}, projectile '{(__instance.m_attackProjectile != null ? __instance.m_attackProjectile.name : "NONE")}'");
+                if (!_lastWasSecondary && __instance.m_attackAnimation != d.SecAnim)   // The primary's trigger frame (the projectile spawns here); 1.0.144: the secondary's own trigger is not labelled primary
+                    StaffLog.LogDebug($"[EarlyMagic] {staff} primary: trigger frame - animation '{__instance.m_attackAnimation}', type {__instance.m_attackType}, projectile '{(__instance.m_attackProjectile != null ? __instance.m_attackProjectile.name : "NONE")}'");
                 var item = who.GetCurrentWeapon();
                 bool secondary = item != null && __instance.m_attackAnimation == d.SecAnim && _lastWasSecondary;
                 if (!secondary)
                 {
                     // No Mistile at the trigger frame any more - the bolt flies, and its impact spawns the Mistile
                     if (d.MendEvery3 && ++_shots % 3 == 0 && Aoes.TryGetValue(d.Staff + "_mend", out var mend))
-                    { Spawn(mend, who, who.transform.position, item); Debug.Log($"[EarlyMagic] {staff} primary: 3rd shot -> group mend {mend.name} at your feet (5 m)"); }
+                    { Spawn(mend, who, who.transform.position, item); StaffLog.LogDebug($"[EarlyMagic] {staff} primary: 3rd shot -> group mend {mend.name} at your feet (5 m)"); }
                     return;
                 }
                 _lastWasSecondary = false;
-                if (d.Secondary == Sec.Ward) { Debug.Log($"[EarlyMagic] {staff} secondary: Warding Moss -> vanilla protection bubble (staff_shield_aoe) on you + allies near you"); return; }
+                if (d.Secondary == Sec.Ward) { StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: Warding Moss -> vanilla protection bubble (staff_shield_aoe) on you + allies near you"); return; }
                 if (d.Secondary == Sec.Fan || d.Secondary == Sec.Lance) return;   // projectiles: logged on hit
                 if (!Aoes.TryGetValue(d.Staff + "_sec", out var aoe)) { Debug.LogWarning($"[EarlyMagic] {staff} secondary: no AoE built for {d.Secondary}"); return; }
                 Vector3 at = d.SelfCentred || !_castPoint.HasValue ? who.transform.position : _castPoint.Value;
                 Spawn(aoe, who, at, item);
-                Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} -> {aoe.name} at {at:F1} (radius {d.Radius:0.#} m, {d.Ttl:0.#} s)");
+                StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} -> {aoe.name} at {at:F1} (radius {d.Radius:0.#} m, {d.Ttl:0.#} s)");
                 _castPoint = null;
             }
         }
@@ -860,13 +998,13 @@ namespace VerdantsAscent.Managers
             Vector3 aimFrom = CrosshairFrom(caster, out Vector3 aimDir);
             Character target = ConeTarget(caster, aimFrom, aimDir, HomingTargetRange, out float lockAngle);
             if (target != null) TargetField?.SetValue(ai, target);
-            Debug.Log($"[EarlyMagic] {d.Staff} homing: Mistile {(target != null ? $"locked {target.m_name} (angle {lockAngle:0.#} deg, dist {Vector3.Distance(at, target.transform.position):0.#} m)" : $"no enemy within {HomingCone?.Value ?? 12f:0} deg of the aim yet (keeps looking along it)")}, arms at 0 m (it spawns at the impact)");
+            StaffLog.LogDebug($"[EarlyMagic] {d.Staff} homing: Mistile {(target != null ? $"locked {target.m_name} (angle {lockAngle:0.#} deg, dist {Vector3.Distance(at, target.transform.position):0.#} m)" : $"no enemy within {HomingCone?.Value ?? 12f:0} deg of the aim yet (keeps looking along it)")}, arms at 0 m (it spawns at the impact)");
             var dmg = item != null ? item.GetDamage() : new HitData.DamageTypes();
             dmg.Modify(1f + caster.GetSkillLevel(Skills.SkillType.ElementalMagic) / 100f);   // tier + quality (item) and skill: no cap
             dmg.Modify(EarlyMagic.MistileShare?.Value ?? 0.5f);   // The Mistile rides on the bolt, so it hits for a share of it
             var run = new MistileRun { Caster = caster, Body = body, Def = d, Damage = dmg, DieAt = Time.time + d.MistileLife, Last = at, Locked = target, AimFrom = aimFrom, AimDir = aimDir };
             Mistiles.Add(run);
-            Debug.Log($"[EarlyMagic] {d.Staff} primary: Mistile spawned at {at:F1} (faction Players, speed {d.MistileSpeed:0.#}, turn {d.MistileTurn:0}, life {d.MistileLife:0} s, cap {MistilesPerCaster}/caster, burst {dmg.GetTotalDamage():0.#}: fire {dmg.m_fire:0.#} poison {dmg.m_poison:0.#}); target {(target != null ? target.m_name : "its own pick among your enemies")}");
+            StaffLog.LogDebug($"[EarlyMagic] {d.Staff} primary: Mistile spawned at {at:F1} (faction Players, speed {d.MistileSpeed:0.#}, turn {d.MistileTurn:0}, life {d.MistileLife:0} s, cap {MistilesPerCaster}/caster, burst {dmg.GetTotalDamage():0.#}: fire {dmg.m_fire:0.#} poison {dmg.m_poison:0.#}); target {(target != null ? target.m_name : "its own pick among your enemies")}");
         }
 
         // the caster's enemy, alive, and not a passive / neutral animal (no stray aggro on deer, boars that weren't provoked, etc.)
@@ -880,7 +1018,7 @@ namespace VerdantsAscent.Managers
                 var nv = r.Body.GetComponent<ZNetView>();
                 if (nv != null && nv.IsValid() && nv.IsOwner()) ZNetScene.instance.Destroy(r.Body.gameObject);
             }
-            Debug.Log($"[EarlyMagic] {r.Def.Staff} primary: Mistile despawned: {why}");
+            StaffLog.LogDebug($"[EarlyMagic] {r.Def.Staff} primary: Mistile despawned: {why}");
             r.Body = null;
         }
 
@@ -893,7 +1031,7 @@ namespace VerdantsAscent.Managers
                 for (int i = Mistiles.Count - 1; i >= 0; i--)
                 {
                     var r = Mistiles[i];
-                    if (r.Body == null || r.Body.IsDead()) { if (r.Body != null || !r.Burst) Debug.Log($"[EarlyMagic] {r.Def.Staff} primary: Mistile despawned: {(r.Burst ? "exploded" : "gone")}"); Mistiles.RemoveAt(i); continue; }
+                    if (r.Body == null || r.Body.IsDead()) { if (r.Body != null || !r.Burst) StaffLog.LogDebug($"[EarlyMagic] {r.Def.Staff} primary: Mistile despawned: {(r.Burst ? "exploded" : "gone")}"); Mistiles.RemoveAt(i); continue; }
                     if (!On || Time.time >= r.DieAt) { Despawn(r, On ? $"lifetime {r.Def.MistileLife:0} s" : "Staff Attack Styles turned off"); Mistiles.RemoveAt(i); continue; }
                     r.Last = r.Body.transform.position;
                     var ai = r.Body.GetComponent<MonsterAI>();
@@ -904,7 +1042,7 @@ namespace VerdantsAscent.Managers
                     {
                         r.NextLook = Time.time + HomingRetargetInterval;
                         r.Locked = ConeTarget(r.Caster, r.AimFrom, r.AimDir, HomingTargetRange, out float a2);
-                        if (r.Locked != null) Debug.Log($"[EarlyMagic] {r.Def.Staff} homing: Mistile locked {r.Locked.m_name} (angle {a2:0.#} deg, dist {Vector3.Distance(r.Body.transform.position, r.Locked.transform.position):0.#} m) along the original aim");
+                        if (r.Locked != null) StaffLog.LogDebug($"[EarlyMagic] {r.Def.Staff} homing: Mistile locked {r.Locked.m_name} (angle {a2:0.#} deg, dist {Vector3.Distance(r.Body.transform.position, r.Locked.transform.position):0.#} m) along the original aim");
                     }
                     TargetField?.SetValue(ai, r.Locked != null && !r.Locked.IsDead() ? r.Locked : null);
                 }
@@ -928,7 +1066,7 @@ namespace VerdantsAscent.Managers
                 hit.m_skill = Skills.SkillType.ElementalMagic;
                 if (!r.Burst && Aoes.TryGetValue(r.Def.Staff + "_hit", out var burst)) { Spawn(burst, r.Caster as Humanoid, r.Last, (r.Caster as Humanoid)?.GetCurrentWeapon()); }
                 r.Burst = true;
-                Debug.Log($"[EarlyMagic] {r.Def.Staff} primary: Mistile exploded on {__instance.m_name}: {hit.m_damage.GetTotalDamage():0.#} (fire {hit.m_damage.m_fire:0.#} poison {hit.m_damage.m_poison:0.#}) as {r.Caster.m_name}'s hit{(Aoes.ContainsKey(r.Def.Staff + "_hit") ? " + " + r.Def.Staff + " burst" : "")}");
+                StaffLog.LogDebug($"[EarlyMagic] {r.Def.Staff} primary: Mistile exploded on {__instance.m_name}: {hit.m_damage.GetTotalDamage():0.#} (fire {hit.m_damage.m_fire:0.#} poison {hit.m_damage.m_poison:0.#}) as {r.Caster.m_name}'s hit{(Aoes.ContainsKey(r.Def.Staff + "_hit") ? " + " + r.Def.Staff + " burst" : "")}");
             }
         }
 
@@ -964,10 +1102,10 @@ namespace VerdantsAscent.Managers
                 // no damage, no spawn-on-hit, the bolt flies on), so those contacts are named as passes, and chain / pierce never start on them
                 if (hit != null && (hit == owner || !BaseAI.IsEnemy(owner, hit)))
                 {
-                    Debug.Log($"[EarlyMagic] {staff} {(bolt.EndsWith("FrostLance") ? "secondary" : "primary")}: {bolt} passed through {(hit == owner ? "the caster" : "friendly " + hit.m_name)} (vanilla ignores it: no damage, the bolt flies on)");
+                    StaffLog.LogDebug($"[EarlyMagic] {staff} {(bolt.EndsWith("FrostLance") ? "secondary" : "primary")}: {bolt} passed through {(hit == owner ? "the caster" : "friendly " + hit.m_name)} (vanilla ignores it: no damage, the bolt flies on)");
                     return;
                 }
-                Debug.Log($"[EarlyMagic] {staff} {(bolt.EndsWith("FrostLance") ? "secondary" : "primary")}: {bolt} -> {(hit != null ? hit.m_name : "terrain")}{(__instance.m_spawnOnHit != null ? $" (+{__instance.m_spawnOnHit.name})" : "")}{(__instance.m_healthReturn > 0f ? $", drain {__instance.m_healthReturn:0.#} health to you" : "")}");
+                StaffLog.LogDebug($"[EarlyMagic] {staff} {(bolt.EndsWith("FrostLance") ? "secondary" : "primary")}: {bolt} -> {(hit != null ? hit.m_name : "terrain")}{(__instance.m_spawnOnHit != null ? $" (+{__instance.m_spawnOnHit.name})" : "")}{(__instance.m_healthReturn > 0f ? $", drain {__instance.m_healthReturn:0.#} health to you" : "")}");
                 // A Mistile staff's bolt spawns the homing Mistile where it hits (enemy or terrain) - an extra on top of the
                 // bolt's own hit; the Mistile keeps the staff's settings (Players faction, the caster as attacker, the per-caster cap)
                 var md = DefOf(staff);
@@ -975,7 +1113,7 @@ namespace VerdantsAscent.Managers
                 {
                     Vector3 vel = Traverse.Create(__instance).Field("m_vel").GetValue<Vector3>();
                     Vector3 point = hit != null ? hit.GetCenterPoint() : __instance.transform.position;
-                    Debug.Log($"[EarlyMagic] {staff} primary: {bolt} impact at {point:F1} ({(hit != null ? hit.m_name : "terrain")}) -> spawning the homing Mistile");
+                    StaffLog.LogDebug($"[EarlyMagic] {staff} primary: {bolt} impact at {point:F1} ({(hit != null ? hit.m_name : "terrain")}) -> spawning the homing Mistile");
                     SpawnMistile(owner as Humanoid, md, (owner as Humanoid)?.GetCurrentWeapon(), point, vel);
                 }
                 if (hit == null) return;
@@ -993,7 +1131,7 @@ namespace VerdantsAscent.Managers
             h.m_damage.m_lightning = Traverse.Create(p).Field("m_damage").GetValue<HitData.DamageTypes>().m_lightning * ChainDamageShare;
             h.SetAttacker(owner);
             next.Damage(h);
-            Debug.Log($"[EarlyMagic] Thunderpine primary: chain -> {next.m_name} {h.m_damage.m_lightning:0.#} lightning (60%)");
+            StaffLog.LogDebug($"[EarlyMagic] Thunderpine primary: chain -> {next.m_name} {h.m_damage.m_lightning:0.#} lightning (60%)");
         }
 
         private static void Pierce(Character owner, Character first, Projectile p)
@@ -1013,7 +1151,7 @@ namespace VerdantsAscent.Managers
                 c.Damage(h);
                 n++;
             }
-            Debug.Log($"[EarlyMagic] Frostglass secondary: Glacial Lance pierced {n} more foe(s) in 8 m");
+            StaffLog.LogDebug($"[EarlyMagic] Frostglass secondary: Glacial Lance pierced {n} more foe(s) in 8 m");
         }
 
         // Log only: where a hit's damage actually lands on a live Mistile (Character.ApplyDamage), whatever path it came by,
@@ -1024,7 +1162,7 @@ namespace VerdantsAscent.Managers
             private static void Prefix(Character __instance, HitData hit)
             {
                 if (__instance == null || hit == null || Mistiles.Count == 0) return;
-                foreach (var m in Mistiles) if (m.Body == __instance) { var by = hit.GetAttacker(); Debug.Log($"[EarlyMagic] {m.Def.Staff} Mistile trace: damage LANDS on it - attacker {(by != null ? by.m_name : "none")}, {hit.GetTotalDamage():0.#}, hp {__instance.GetHealth():0.#}"); }
+                foreach (var m in Mistiles) if (m.Body == __instance) { var by = hit.GetAttacker(); StaffLog.LogDebug($"[EarlyMagic] {m.Def.Staff} Mistile trace: damage LANDS on it - attacker {(by != null ? by.m_name : "none")}, {hit.GetTotalDamage():0.#}, hp {__instance.GetHealth():0.#}"); }
             }
         }
 
@@ -1041,13 +1179,13 @@ namespace VerdantsAscent.Managers
                 if (__instance == null || hit == null || Mistiles.Count == 0) return true;
                 // Every Damage call that touches a
                 // live Mistile - on it, by it, or with no attacker within 4 m of it - is logged (who, whom, damage), so an early death shows its cause
-                { var by = hit.GetAttacker(); foreach (var m in Mistiles) { if (m.Body == null) continue; bool on = m.Body == __instance, byIt = by == m.Body, near = by == null && Vector3.Distance(m.Body.transform.position, __instance.transform.position) < 4f; if (on || byIt || near) Debug.Log($"[EarlyMagic] {m.Def.Staff} Mistile trace: {(on ? "hit ON it" : byIt ? "hit BY it" : "no-attacker hit near it")} - attacker {(by != null ? by.m_name : "none")}, target {__instance.m_name}, damage {hit.GetTotalDamage():0.#} (fire {hit.m_damage.m_fire:0.#} poison {hit.m_damage.m_poison:0.#} blunt {hit.m_damage.m_blunt:0.#}), Mistile hp {m.Body.GetHealth():0.#}"); } }
+                { var by = hit.GetAttacker(); foreach (var m in Mistiles) { if (m.Body == null) continue; bool on = m.Body == __instance, byIt = by == m.Body, near = by == null && Vector3.Distance(m.Body.transform.position, __instance.transform.position) < 4f; if (on || byIt || near) StaffLog.LogDebug($"[EarlyMagic] {m.Def.Staff} Mistile trace: {(on ? "hit ON it" : byIt ? "hit BY it" : "no-attacker hit near it")} - attacker {(by != null ? by.m_name : "none")}, target {__instance.m_name}, damage {hit.GetTotalDamage():0.#} (fire {hit.m_damage.m_fire:0.#} poison {hit.m_damage.m_poison:0.#} blunt {hit.m_damage.m_blunt:0.#}), Mistile hp {m.Body.GetHealth():0.#}"); } }
                 MistileRun run = null;
                 foreach (var m in Mistiles) if (m.Body == __instance) { run = m; break; }
                 if (run == null) return true;
                 var from = hit.GetAttacker();
                 if (from == __instance) return true;   // its own explosion / self-destruct still kills it
-                if (!run.ShieldLogged) { run.ShieldLogged = true; Debug.Log($"[EarlyMagic] {run.Def.Staff} primary: a hit on the Mistile from {(from != null ? from.m_name : "an AoE / no attacker")} ({hit.GetTotalDamage():0.#}) ignored - it only dies by its own explosion"); }
+                if (!run.ShieldLogged) { run.ShieldLogged = true; StaffLog.LogDebug($"[EarlyMagic] {run.Def.Staff} primary: a hit on the Mistile from {(from != null ? from.m_name : "an AoE / no attacker")} ({hit.GetTotalDamage():0.#}) ignored - it only dies by its own explosion"); }
                 return false;
             }
         }
@@ -1074,7 +1212,7 @@ namespace VerdantsAscent.Managers
                 if (!PartyLogAt.TryGetValue(key, out float t) || Time.time >= t)
                 {
                     PartyLogAt[key] = Time.time + PartyLogInterval;
-                    Debug.Log($"[EarlyMagic] skipped party member {__instance.m_name} ({StaffOf(h)} hit from {attacker.m_name}: no damage, heal/buff kept)");
+                    StaffLog.LogDebug($"[EarlyMagic] skipped party member {__instance.m_name} ({StaffOf(h)} hit from {attacker.m_name}: no damage, heal/buff kept)");
                 }
             }
         }
@@ -1086,7 +1224,7 @@ namespace VerdantsAscent.Managers
             {
                 _isPartyLooked = true;
                 _isParty = AccessTools.TypeByName("FiresCore.Npc.Archetypes.ClassTargeting")?.GetMethod("IsPartyMember", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Character), typeof(Character) }, null);
-                Debug.Log($"[EarlyMagic] party guard: {(_isParty != null ? "Core ClassTargeting.IsPartyMember" : "Core missing: not-an-enemy = party")}");
+                StaffLog.LogDebug($"[EarlyMagic] party guard: {(_isParty != null ? "Core ClassTargeting.IsPartyMember" : "Core missing: not-an-enemy = party")}");
             }
             if (_isParty != null) { try { return (bool)_isParty.Invoke(null, new object[] { caster, target }); } catch { } }
             return !BaseAI.IsEnemy(caster, target);
@@ -1100,7 +1238,7 @@ namespace VerdantsAscent.Managers
                 if (!On || hit == null || hit.GetAttacker() != Player.m_localPlayer) return;
                 string staff = StaffOf(Player.m_localPlayer);
                 if (staff == null || hit.GetTotalDamage() <= 0f) return;
-                Debug.Log($"[EarlyMagic] {staff} damage applied: {hit.GetTotalDamage():0.#} to {__instance.m_name} (blunt {hit.m_damage.m_blunt:0.#} fire {hit.m_damage.m_fire:0.#} frost {hit.m_damage.m_frost:0.#} lightning {hit.m_damage.m_lightning:0.#} poison {hit.m_damage.m_poison:0.#} spirit {hit.m_damage.m_spirit:0.#})");
+                StaffLog.LogDebug($"[EarlyMagic] {staff} damage applied: {hit.GetTotalDamage():0.#} to {__instance.m_name} (blunt {hit.m_damage.m_blunt:0.#} fire {hit.m_damage.m_fire:0.#} frost {hit.m_damage.m_frost:0.#} lightning {hit.m_damage.m_lightning:0.#} poison {hit.m_damage.m_poison:0.#} spirit {hit.m_damage.m_spirit:0.#})");
             }
         }
 
@@ -1144,7 +1282,7 @@ namespace VerdantsAscent.Managers
             var t = Type.GetType("FiresCore.Animation.ClipSlots, FiresUnifiedCore", false);
             _play = t?.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).FirstOrDefault(m => m.Name == "Play" && m.GetParameters().Length == 3);
             _stop = t?.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).FirstOrDefault(m => m.Name == "Stop" && m.GetParameters().Length == 2);
-            Debug.Log($"{MyMod.PluginName}: staff attack styles: clip slots {(_play != null ? "found (Core ClipSlots)" : "not available (Core older than 0.2.493): vanilla poses")}");
+            VabLog.Line($"{MyMod.PluginName}: staff attack styles: clip slots {(_play != null ? "found (Core ClipSlots)" : "not available (Core older than 0.2.493): vanilla poses")}");
         }
 
         internal static void Play(Character body, string id)
@@ -1154,14 +1292,14 @@ namespace VerdantsAscent.Managers
             bool ok = false;
             try { ok = _play.Invoke(null, new object[] { body, id, null }) is bool b && b; } catch { }
             _playing = ok ? id : null;
-            Debug.Log($"[EarlyMagic] aim pose: clip '{id}' {(ok ? "playing" : "not played (id not registered / can't play): vanilla pose")}");
+            StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] aim pose: clip '{id}' {(ok ? "playing" : "not played (id not registered / can't play): vanilla pose")}");
         }
 
         internal static void Stop(Character body)
         {
             if (_playing == null || _stop == null || body == null) return;
             try { _stop.Invoke(null, new object[] { body, -1f }); } catch { }
-            Debug.Log($"[EarlyMagic] aim pose: clip '{_playing}' stopped");
+            StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] aim pose: clip '{_playing}' stopped");
             _playing = null;
         }
     }
@@ -1208,7 +1346,7 @@ namespace VerdantsAscent.Managers
             if (_looked) return;
             _looked = true;
             var t = Type.GetType("FiresCore.Animation.ClipSlots, FiresUnifiedCore", false);
-            if (t == null) { Debug.Log($"{MyMod.PluginName}: staff secondary clips: no Core ClipSlots (older than 0.2.493): vanilla poses"); return; }
+            if (t == null) { VabLog.Line($"{MyMod.PluginName}: staff secondary clips: no Core ClipSlots (older than 0.2.493): vanilla poses"); return; }
             var all = t.GetMethods(BindingFlags.Public | BindingFlags.Static);
             _play = all.FirstOrDefault(m => m.Name == "Play" && m.GetParameters().Length == 3);
             _isRegistered = all.FirstOrDefault(m => m.Name == "IsRegistered" && m.GetParameters().Length == 1);
@@ -1216,7 +1354,7 @@ namespace VerdantsAscent.Managers
             var ev = t.GetEvent("ClipEvent", BindingFlags.Public | BindingFlags.Static);
             if (ev != null && _addEvent != null)
                 ev.AddEventHandler(null, Delegate.CreateDelegate(ev.EventHandlerType, typeof(SecClip).GetMethod(nameof(OnClipEvent), BindingFlags.NonPublic | BindingFlags.Static)));
-            Debug.Log($"{MyMod.PluginName}: staff secondary clips: Core ClipSlots {(_play != null && ev != null && _addEvent != null ? "found (Play + AddEvent + ClipEvent)" : "without AddEvent / ClipEvent: vanilla poses")}");
+            VabLog.Line($"{MyMod.PluginName}: staff secondary clips: Core ClipSlots {(_play != null && ev != null && _addEvent != null ? "found (Play + AddEvent + ClipEvent)" : "without AddEvent / ClipEvent: vanilla poses")}");
             if (ev == null || _addEvent == null) _play = null;
         }
 
@@ -1229,14 +1367,14 @@ namespace VerdantsAscent.Managers
             try
             {
                 if (!(_isRegistered.Invoke(null, new object[] { m.id }) is bool reg && reg))
-                { Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' not registered (RPGClasses' clips off / older): vanilla pose"); return; }
+                { StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' not registered (RPGClasses' clips off / older): vanilla pose"); return; }
                 if (Evented.Add(m.id)) _addEvent.Invoke(null, new object[] { m.id, m.at, Evt });
                 var attack = Traverse.Create(who).Field("m_currentAttack").GetValue<Attack>();
-                if (attack == null) { Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} no current attack: vanilla pose"); return; }
+                if (attack == null) { StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} no current attack: vanilla pose"); return; }
                 bool ok = _play.Invoke(null, new object[] { who, m.id, null }) is bool b && b;
-                if (!ok) { Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' didn't play: vanilla pose"); return; }
+                if (!ok) { StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' didn't play: vanilla pose"); return; }
                 _pending = attack; _staff = staff; _clip = m.id; _sec = d.Secondary; _since = Time.time;
-                Debug.Log($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' playing, cast at {m.at:0.00} of the clip ('{d.SecAnim}' replaced)");
+                StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {staff} secondary: {d.Secondary} clip '{m.id}' playing, cast at {m.at:0.00} of the clip ('{d.SecAnim}' replaced)");
             }
             catch (Exception e) { Debug.LogWarning($"[EarlyMagic] {staff} secondary: clip failed ({e.GetBaseException().Message}): vanilla pose"); _pending = null; }
         }
@@ -1265,12 +1403,12 @@ namespace VerdantsAscent.Managers
             // on a stale Attack
             var me = Player.m_localPlayer;
             if (me == null || me.IsDead() || !ReferenceEquals(Traverse.Create(me).Field("m_currentAttack").GetValue<Attack>(), a))
-            { Debug.Log($"[EarlyMagic] {_staff} secondary: {_sec} attack ended before the cast frame ({how}): cast dropped (clip '{_clip}', {Time.time - _since:0.00} s after the press)"); return; }
+            { StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {_staff} secondary: {_sec} attack ended before the cast frame ({how}): cast dropped (clip '{_clip}', {Time.time - _since:0.00} s after the press)"); return; }
             _firing = true;
             try { a.OnAttackTrigger(); }
             catch (Exception e) { Debug.LogWarning($"[EarlyMagic] {_staff} secondary: trigger threw {e.GetBaseException().Message}"); }
             finally { _firing = false; }
-            Debug.Log($"[EarlyMagic] {_staff} secondary: {_sec} cast frame via {how} (clip '{_clip}', {Time.time - _since:0.00} s after the press)");
+            StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {_staff} secondary: {_sec} cast frame via {how} (clip '{_clip}', {Time.time - _since:0.00} s after the press)");
         }
     }
 
@@ -1304,7 +1442,7 @@ namespace VerdantsAscent.Managers
                 _picked = true; _start = transform.position;
                 Vector3 from = StaffAttackStyles.CrosshairFrom(owner, out Vector3 dir);
                 _target = StaffAttackStyles.ConeTarget(owner, from, dir, 40f, out float ang);
-                Debug.Log($"[EarlyMagic] {StaffName} homing: {(_target != null ? $"locked {_target.m_name} (angle {ang:0.#} deg, dist {Vector3.Distance(transform.position, _target.transform.position):0.#} m)" : $"no enemy within {StaffAttackStyles.HomingCone?.Value ?? 12f:0} deg of the crosshair - flies straight")}, arms at {arm:0.#} m");
+                StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] {StaffName} homing: {(_target != null ? $"locked {_target.m_name} (angle {ang:0.#} deg, dist {Vector3.Distance(transform.position, _target.transform.position):0.#} m)" : $"no enemy within {StaffAttackStyles.HomingCone?.Value ?? 12f:0} deg of the crosshair - flies straight")}, arms at {arm:0.#} m");
             }
             if (_target == null || _target.IsDead()) return;
             if (Vector3.Distance(transform.position, _start) < arm) return;
@@ -1328,7 +1466,7 @@ namespace VerdantsAscent.Managers
             m_healthOverTime = heal;
             m_healthOverTimeTicks = m_healthOverTimeDuration > 0f ? m_healthOverTimeDuration / m_healthOverTimeInterval : m_ttl / m_healthOverTimeInterval;
             m_healthOverTimeTickHP = m_healthOverTimeTicks > 0f ? heal / m_healthOverTimeTicks : heal;
-            Debug.Log($"[EarlyMagic] heal applied: {name} on {m_character?.m_name ?? "?"}: {heal:0.#} health over {m_ttl:0.#} s (quality {q}, skill {skillLevel:0}){(m_cleanse ? ", cleanse" : "")}");
+            StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] heal applied: {name} on {m_character?.m_name ?? "?"}: {heal:0.#} health over {m_ttl:0.#} s (quality {q}, skill {skillLevel:0}){(m_cleanse ? ", cleanse" : "")}");
         }
 
         public override void Setup(Character character)
@@ -1338,7 +1476,7 @@ namespace VerdantsAscent.Managers
             foreach (string n in Cleansable)
             {
                 int h = n.GetStableHashCode();
-                if (character.GetSEMan().HaveStatusEffect(h)) { character.GetSEMan().RemoveStatusEffect(h); Debug.Log($"[EarlyMagic] Moonsilver secondary: Moon Ring cleansed '{n}' from {character.m_name}"); break; }
+                if (character.GetSEMan().HaveStatusEffect(h)) { character.GetSEMan().RemoveStatusEffect(h); StaffAttackStyles.StaffLog.LogDebug($"[EarlyMagic] Moonsilver secondary: Moon Ring cleansed '{n}' from {character.m_name}"); break; }
             }
         }
     }

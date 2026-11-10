@@ -37,7 +37,7 @@ namespace VerdantsAscent.Managers
                 new[] { typeof(ItemDrop.ItemData), typeof(int), typeof(int), typeof(Heightmap.Biome), typeof(float) }, null);
             s_rollsOn = api?.GetProperty("RollsOn", BindingFlags.Public | BindingFlags.Static)?.GetGetMethod();   // add-only, may come later
             s_bags = new HashSet<string>(BackpackCraftingAndLoot.BagPrefabs);
-            Debug.Log($"{MyMod.PluginName}: chest bag FLO rarity: FloApi {(api != null ? "found" : "NOT loaded")}, Roll(ItemData,int,int,Biome,float) {(s_roll != null ? "resolved" : "NOT resolved")}, RollsOn {(s_rollsOn != null ? "resolved" : "absent")}; key '{Enabled?.Definition.Key}' = {Enabled?.Value}");
+            VabLog.Line($"{MyMod.PluginName}: chest bag FLO rarity: FloApi {(api != null ? "found" : "NOT loaded")}, Roll(ItemData,int,int,Biome,float) {(s_roll != null ? "resolved" : "NOT resolved")}, RollsOn {(s_rollsOn != null ? "resolved" : "absent")}; key '{Enabled?.Definition.Key}' = {Enabled?.Value}");
         }
 
         internal static void LogAtLoad() => Resolve();
@@ -73,7 +73,7 @@ namespace VerdantsAscent.Managers
                         string prefab = item?.m_dropPrefab?.name;
                         if (prefab == null || !s_bags.Contains(prefab)) continue;
                         bool rolled = (bool)s_roll.Invoke(null, new object[] { item, -1, tier, biome, 1f });
-                        Debug.Log($"[VABackpacks] chest bag {prefab} rolled via FLO: {rolled} (tier {tier}, {biome}, chest {Utils.GetPrefabName(__instance.gameObject)})");
+                        VabLog.Line($"[VABackpacks] chest bag {prefab} rolled via FLO: {rolled} (tier {tier}, {biome}, chest {Utils.GetPrefabName(__instance.gameObject)})");
                     }
                 }
                 catch (Exception e) { Debug.LogWarning($"{MyMod.PluginName}: chest bag FLO roll failed: {(e.InnerException ?? e).Message}"); }

@@ -43,7 +43,7 @@ namespace VerdantsAscent.Managers.Camp
             var source = bench != null ? bench.GetComponent<CraftingStation>()?.m_areaMarker : null;
             if (source == null)
             {
-                if (!logged) { logged = true; Debug.Log("[VABackpacks] camp circle: no workbench area marker to copy; no circle"); }
+                if (!logged) { logged = true; VabLog.Line("[VABackpacks] camp circle: no workbench area marker to copy; no circle"); }
                 return false;
             }
             // Not parented to the chest: the chest's scale must not stretch the ring (vanilla's circle is drawn at scale 1).
@@ -53,7 +53,7 @@ namespace VerdantsAscent.Managers.Camp
             projector = circle.GetComponent<CircleProjector>();
             if (projector != null) projector.m_radius = Radius;
             circle.SetActive(false);
-            Debug.Log($"[VABackpacks] camp circle: the save ring ({Radius:0.#} m) is drawn around the camp chest at {CampRing.Centre(marker)} (CampRing, the same circle pack-up captures)");
+            VabLog.Line($"[VABackpacks] camp circle: the save ring ({Radius:0.#} m) is drawn around the camp chest at {CampRing.Centre(marker)} (CampRing, the same circle pack-up captures)");
             return true;
         }
 

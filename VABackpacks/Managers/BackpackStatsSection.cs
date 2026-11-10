@@ -22,8 +22,8 @@ namespace VerdantsAscent.Managers
 
         internal static void Register()
         {
-            try { RegisterWithCore(); Debug.Log($"[VABackpacks] stats: '{Id}' registered on the hub's Stats tab (order {Order})"); }
-            catch (Exception e) { Debug.Log($"[VABackpacks] stats: no hub Stats tab here (Core older than 0.2.511, or no Core): {e.GetBaseException().Message}"); }
+            try { RegisterWithCore(); VabLog.Line($"[VABackpacks] stats: '{Id}' registered on the hub's Stats tab (order {Order})"); }
+            catch (Exception e) { VabLog.Line($"[VABackpacks] stats: no hub Stats tab here (Core older than 0.2.511, or no Core): {e.GetBaseException().Message}"); }
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]

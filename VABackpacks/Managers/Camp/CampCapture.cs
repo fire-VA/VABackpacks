@@ -271,7 +271,7 @@ namespace VerdantsAscent.Managers.Camp
                    $"({foreign} foreign, {unowned} with no builder, {warded} warded)" + (skippedTotal > 0 ? $"; skipped {skippedTotal}: {string.Join(", ", skipped)}{(skippedTotal > skipped.Count ? ", ..." : "")}" : "");
             if (taken.Count == 0) storage = new CampStorage.Totals();
             // The counts in one line, always at Info: found in the ring / captured / removed / left behind (reasons above)
-            CampLog.LogInfo($"camp pack-up counts: {st.InRing} build piece(s) in the ring (+{crops} crops), {found.Count} to capture ({st.Adopted} with no builder), {taken.Count} captured + removed, " +
+            CampLog.LogDebug($"camp pack-up counts: {st.InRing} build piece(s) in the ring (+{crops} crops), {found.Count} to capture ({st.Adopted} with no builder), {taken.Count} captured + removed, " +
                 $"{stayed} not removed, {leftBehind.Count} over the cap/data limit, {skippedTotal} skipped ({foreign} foreign, {unowned} world/no-builder, {warded} warded)");
             return blueprint;
         }
@@ -414,7 +414,7 @@ namespace VerdantsAscent.Managers.Camp
                     piece.SetCreator(player.GetPlayerID(), Splatform.PlatformManager.DistributionPlatform.LocalUser.PlatformUserID);
                 placed++;
             }
-            Debug.Log($"[VABackpacks] camp deploy: {placed} packed pieces placed (blueprint v{version}, facing {campYaw:0}, {grown} plants carry on growing), {missing} unknown prefab(s), {dataFailed} data blob(s) not applied");
+            VabLog.Line($"[VABackpacks] camp deploy: {placed} packed pieces placed (blueprint v{version}, facing {campYaw:0}, {grown} plants carry on growing), {missing} unknown prefab(s), {dataFailed} data blob(s) not applied");
             return placed;
         }
 

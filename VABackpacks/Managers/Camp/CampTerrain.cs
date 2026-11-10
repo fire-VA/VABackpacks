@@ -162,7 +162,7 @@ namespace VerdantsAscent.Managers.Camp
             // when the patch is on a zone seam, the seam-tear regressed.
             if (result.Count > 0)
             {
-                Debug.Log($"[VABackpacks] CampTerrain.GetCompilers: pos={pos:F1} r={radius:F1} " +
+                VabLog.Line($"[VABackpacks] CampTerrain.GetCompilers: pos={pos:F1} r={radius:F1} " +
                           $"→ {result.Count} compilers (search={searchRadius:F0}m)");
             }
             return result.ToArray();
@@ -193,7 +193,7 @@ namespace VerdantsAscent.Managers.Camp
             }
             if (poked > 0)
             {
-                Debug.Log($"[VABackpacks] RefreshNeighborHeightmaps: poked {poked} heightmaps near {pos:F1} r={radius:F1}");
+                VabLog.Line($"[VABackpacks] RefreshNeighborHeightmaps: poked {poked} heightmaps near {pos:F1} r={radius:F1}");
             }
         }
 

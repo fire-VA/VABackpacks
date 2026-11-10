@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
@@ -24,9 +24,9 @@ namespace VerdantsAscent.Managers
 
             MyMod.piecePrefabs.Clear();
             var allAssets = MyMod.assetBundle.GetAllAssetNames();
-            Debug.Log($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets");
+            VabLog.Line($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets");
             if (ConfigManager.Instance?.configVerboseLogging?.Value ?? false)
-                Debug.Log($"{MyMod.PluginName}: bundle assets: {string.Join(", ", allAssets)}");
+                VabLog.Line($"{MyMod.PluginName}: bundle assets: {string.Join(", ", allAssets)}");
 
             int failed = 0;
             foreach (var pieceName in PieceNames)
@@ -62,10 +62,10 @@ namespace VerdantsAscent.Managers
                 piecePrefab.SetActive(true);
 
                 MyMod.piecePrefabs.Add(piecePrefab);
-                Debug.Log($"{MyMod.PluginName}: Loaded piece prefab: {pieceName}");
+                VabLog.Line($"{MyMod.PluginName}: Loaded piece prefab: {pieceName}");
             }
 
-            Debug.Log($"{MyMod.PluginName}: Loaded {MyMod.piecePrefabs.Count} pieces. Failed: {failed}");
+            VabLog.Line($"{MyMod.PluginName}: Loaded {MyMod.piecePrefabs.Count} pieces. Failed: {failed}");
         }
 
         public static void AddPiecesToHammer()
@@ -112,7 +112,7 @@ namespace VerdantsAscent.Managers
                     added++;
                 }
             }
-            if (added > 0) Debug.Log($"{MyMod.PluginName}: added {added} piece(s) to the Hammer");
+            if (added > 0) VabLog.Line($"{MyMod.PluginName}: added {added} piece(s) to the Hammer");
         }
     }
 }

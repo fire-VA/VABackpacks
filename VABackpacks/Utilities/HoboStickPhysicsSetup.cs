@@ -50,7 +50,7 @@ namespace VerdantsAscent.Utilities
                     configured++;
             }
 
-            Debug.Log($"[HoboStickPhysicsSetup] Configured {configured} pendulum variant(s) on {hoboStickPrefab.name}.");
+            VabLog.Line($"[HoboStickPhysicsSetup] Configured {configured} pendulum variant(s) on {hoboStickPrefab.name}.");
         }
 
         private static bool TryConfigureVariant(Transform modelRoot)

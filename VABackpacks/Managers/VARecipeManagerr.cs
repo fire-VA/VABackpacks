@@ -1,4 +1,4 @@
-﻿// VARecipeManager.cs
+// VARecipeManager.cs
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -17,7 +17,7 @@ namespace VerdantsAscent.Managers
         {
             if (ZNetScene.instance == null || MyMod.piecePrefabs.Count == 0)
             {
-                Debug.Log($"{MyMod.PluginName}: Cannot update piece requirements - ZNetScene or piece list not ready.");
+                VabLog.Line($"{MyMod.PluginName}: Cannot update piece requirements - ZNetScene or piece list not ready.");
                 return;
             }
 
@@ -70,12 +70,12 @@ namespace VerdantsAscent.Managers
                 if (ConfigManager.Instance.configVerboseLogging.Value)
                 {
                     string reqList = string.Join(" | ", requirements.Select(r => $"{r.m_resItem.m_itemData.m_shared.m_name} x{r.m_amount}"));
-                    Debug.Log($"{MyMod.PluginName}: Applied recipe to {pieceName}: {reqList}");
+                    VabLog.Line($"{MyMod.PluginName}: Applied recipe to {pieceName}: {reqList}");
                 }
             }
 
             if (anyApplied && ConfigManager.Instance.configVerboseLogging.Value)
-                Debug.Log($"{MyMod.PluginName}: Piece recipe update complete.");
+                VabLog.Line($"{MyMod.PluginName}: Piece recipe update complete.");
         }
 
         /// <summary>

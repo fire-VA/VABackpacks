@@ -38,6 +38,7 @@ namespace VerdantsAscent.Managers.Camp
             var go = new GameObject("VACampPieceCounter");
             DontDestroyOnLoad(go);
             _instance = go.AddComponent<CampPieceCounter>();
+            _instance._draw = go.AddComponent<Draw>();
         }
 
         /// <summary>True (with the camp) when the point is inside a ring whose camp is at its cap or size limit.</summary>
@@ -61,7 +62,18 @@ namespace VerdantsAscent.Managers.Camp
             return right != null && right.m_shared.m_buildPieces != null;
         }
 
+        // 1.0.151 (Fire 11-05 perf pass, hot path: OnGUI on this always-alive object, every frame): the drawing lives on a component that is on only while a count shows
+        sealed class Draw : MonoBehaviour { void OnGUI() { if (_instance != null) _instance.DrawGui(); } }
+        Draw _draw;
+
         void Update()
+        {
+            Tick();
+            bool want = !ConfigManager.Instance.configPerfCampCounterGui.Value || (_camp != null && _count >= 0);
+            if (_draw != null && _draw.enabled != want) { _draw.enabled = want; Log.LogDebug($"camp counter drawing {(want ? "on: inside a camp ring while building" : "off: no count to show")}"); }
+        }
+
+        void Tick()
         {
             var player = Player.m_localPlayer;
             BackpackCampMarker camp = null;
@@ -120,7 +132,8 @@ namespace VerdantsAscent.Managers.Camp
             }
         }
 
-        void OnGUI()
+        GUIStyle _style;   // 1.0.131
+        void DrawGui()
         {
             if (_camp == null || _count < 0) return;
             if (_bg == null)
@@ -134,7 +147,9 @@ namespace VerdantsAscent.Managers.Camp
             string text = _sizePct > 0 && _sizePct >= Mathf.RoundToInt(100f * _count / Mathf.Max(1, _cap))
                 ? $"Camp pieces: {_count} / {_cap} (L{_level})   data {_sizePct}%"
                 : $"Camp pieces: {_count} / {_cap} (L{_level})";
-            var style = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;   // 1.0.131 (B3): drawing only, once per frame
+            if (_style == null) _style = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };   // built once
+            var style = _style;
             style.normal.textColor = ink;
             var size = style.CalcSize(new GUIContent(text));
             var rect = new Rect((Screen.width - size.x - 28f) / 2f, 92f, size.x + 28f, size.y + 12f);

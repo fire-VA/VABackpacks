@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
@@ -39,9 +39,9 @@ namespace VerdantsAscent.Managers
             MyMod.itemPrefabs.Clear();
 
             var allAssets = MyMod.assetBundle.GetAllAssetNames();
-            Debug.Log($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets");
+            VabLog.Line($"{MyMod.PluginName}: AssetBundle contains {allAssets.Length} assets");
             if (ConfigManager.Instance?.configVerboseLogging?.Value ?? false)
-                Debug.Log($"{MyMod.PluginName}: bundle assets: {string.Join(", ", allAssets)}");
+                VabLog.Line($"{MyMod.PluginName}: bundle assets: {string.Join(", ", allAssets)}");
 
             int failed = 0;
 
@@ -63,7 +63,7 @@ namespace VerdantsAscent.Managers
                 LoadSingleItem(prefabPath, itemName, ref failed);
             }
 
-            Debug.Log($"{MyMod.PluginName}: Loaded {MyMod.itemPrefabs.Count} items. Failed: {failed}");
+            VabLog.Line($"{MyMod.PluginName}: Loaded {MyMod.itemPrefabs.Count} items. Failed: {failed}");
         }
 
         private static void LoadSingleItem(string prefabPath, string itemName, ref int failed)
@@ -103,7 +103,7 @@ namespace VerdantsAscent.Managers
 
             MyMod.itemPrefabs.Add(itemPrefab);
 
-            Debug.Log($"{MyMod.PluginName}: Loaded item prefab: {itemName}, ItemDrop present: {itemDrop != null}, m_dropPrefab: {(itemDrop.m_itemData.m_dropPrefab != null ? itemDrop.m_itemData.m_dropPrefab.name : "null")}");
+            VabLog.Line($"{MyMod.PluginName}: Loaded item prefab: {itemName}, ItemDrop present: {itemDrop != null}, m_dropPrefab: {(itemDrop.m_itemData.m_dropPrefab != null ? itemDrop.m_itemData.m_dropPrefab.name : "null")}");
         }
     }
 }

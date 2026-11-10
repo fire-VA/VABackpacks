@@ -155,7 +155,7 @@ namespace VerdantsAscent.Managers
             // Container-on-Player path so VABackpacks remains usable solo.
             DetectStorageMode();
 
-            Debug.Log($"{MyMod.PluginName}: BackpackManager initialized with {BackpackPrefabNames.Count} backpacks. " +
+            VabLog.Line($"{MyMod.PluginName}: BackpackManager initialized with {BackpackPrefabNames.Count} backpacks. " +
                       $"Storage mode: {(LegacyMode ? "Legacy Container" : "VAInventory slots")}");
         }
 
@@ -197,12 +197,12 @@ namespace VerdantsAscent.Managers
                     if (n == "VAInventory" || n == "com.Fire.VAInventory")
                     {
                         LegacyMode = false;
-                        Debug.Log($"{MyMod.PluginName}: VAInventory detected - using slot-based storage");
+                        VabLog.Line($"{MyMod.PluginName}: VAInventory detected - using slot-based storage");
                         return;
                     }
                 }
                 LegacyMode = true;
-                Debug.Log($"{MyMod.PluginName}: VAInventory not detected (yet) - defaulting to legacy Container storage; will re-check on player spawn.");
+                VabLog.Line($"{MyMod.PluginName}: VAInventory not detected (yet) - defaulting to legacy Container storage; will re-check on player spawn.");
             }
             catch (System.Exception ex)
             {
@@ -232,7 +232,7 @@ namespace VerdantsAscent.Managers
                 {
                     DetectStorageMode();
                     _storageModeFinalized = true;
-                    Debug.Log($"{MyMod.PluginName}: Storage mode finalized on first spawn: " +
+                    VabLog.Info($"{MyMod.PluginName}: Storage mode finalized on first spawn: " +
                               $"{(LegacyMode ? "Legacy Container" : "VAInventory slots")}");
                 }
 
@@ -244,7 +244,7 @@ namespace VerdantsAscent.Managers
                     if (__instance.gameObject.GetComponent<Container>() == null)
                     {
                         __instance.gameObject.AddComponent<Container>();
-                        Debug.Log($"{MyMod.PluginName}: Added Container to player {__instance.GetPlayerName()} on spawn (legacy mode)");
+                        VabLog.Line($"{MyMod.PluginName}: Added Container to player {__instance.GetPlayerName()} on spawn (legacy mode)");
                     }
                 }
 
@@ -261,7 +261,7 @@ namespace VerdantsAscent.Managers
                     MigrateBackpackFromVanillaSlots(__instance, equippedBackpack);
 
                     OnEquipItem(__instance, equippedBackpack);
-                    Debug.Log($"{MyMod.PluginName}: Refreshed equipped backpack on spawn/login");
+                    VabLog.Line($"{MyMod.PluginName}: Refreshed equipped backpack on spawn/login");
                 }
             }
         }
@@ -299,13 +299,13 @@ namespace VerdantsAscent.Managers
             };
             foreach (var fieldName in fieldNames)
             {
-                var field = typeof(Humanoid).GetField(fieldName,
-                    BindingFlags.Instance | BindingFlags.NonPublic);
+                // 1.0.131 (UI efficiency audit B1): the FieldInfo is looked up ONCE per name (it ran typeof().GetField every frame per slot)
+                if (!s_humanoidFields.TryGetValue(fieldName, out var field)) s_humanoidFields[fieldName] = field = typeof(Humanoid).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
                 if (field == null) continue;
                 if (!ReferenceEquals(field.GetValue(humanoid), backpack)) continue;
 
                 field.SetValue(humanoid, null);
-                Debug.Log($"{MyMod.PluginName}: Migrated backpack '{backpack.m_dropPrefab?.name}' " +
+                VabLog.Info($"{MyMod.PluginName}: Migrated backpack '{backpack.m_dropPrefab?.name}' " +
                           $"out of vanilla {fieldName} — cape slot is now free.");
                 break;
             }
@@ -343,6 +343,7 @@ namespace VerdantsAscent.Managers
         /// Each bag appears at most once. Order is stable across calls so
         /// VAInventory can keep a deterministic panel ordering.
         /// </summary>
+        private static readonly System.Collections.Generic.Dictionary<string, FieldInfo> s_humanoidFields = new System.Collections.Generic.Dictionary<string, FieldInfo>();
         private static System.Collections.Generic.List<ItemDrop.ItemData>
             FindAllEquippedBackpacks(Humanoid humanoid)
         {
@@ -359,8 +360,8 @@ namespace VerdantsAscent.Managers
             // reference, though our hijack is supposed to prevent that).
             void TryAdd(string fieldName)
             {
-                var field = typeof(Humanoid).GetField(fieldName,
-                    BindingFlags.Instance | BindingFlags.NonPublic);
+                // 1.0.131 (UI efficiency audit B1): the FieldInfo is looked up ONCE per name (it ran typeof().GetField every frame per slot)
+                if (!s_humanoidFields.TryGetValue(fieldName, out var field)) s_humanoidFields[fieldName] = field = typeof(Humanoid).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
                 if (field == null) return;
                 if (field.GetValue(humanoid) is ItemDrop.ItemData item
                     && IsBackpack(item)
@@ -568,7 +569,7 @@ namespace VerdantsAscent.Managers
                 item.m_equipped = true;
                 __result = true;
 
-                Debug.Log($"{MyMod.PluginName}: Coexistence equip — '{item.m_dropPrefab?.name}' " +
+                VabLog.Line($"{MyMod.PluginName}: Coexistence equip — '{item.m_dropPrefab?.name}' " +
                           $"tracked outside m_shoulderItem (cape can coexist).");
                 return false;          // SKIP vanilla EquipItem entirely
             }
@@ -594,7 +595,7 @@ namespace VerdantsAscent.Managers
 
                 _equippedBackpacks.Remove(__instance);
                 item.m_equipped = false;
-                Debug.Log($"{MyMod.PluginName}: Coexistence unequip — '{item.m_dropPrefab?.name}' " +
+                VabLog.Line($"{MyMod.PluginName}: Coexistence unequip — '{item.m_dropPrefab?.name}' " +
                           $"removed from coexistence dict.");
 
                 // Postfix patch (Humanoid_UnequipItem_Patch) handles
@@ -634,7 +635,7 @@ namespace VerdantsAscent.Managers
             {
                 if (__instance is Player player && IsBackpack(item))
                 {
-                    Debug.Log($"{MyMod.PluginName}: Backpack unequipped - closing container if open");
+                    VabLog.Line($"{MyMod.PluginName}: Backpack unequipped - closing container if open");
                     // The container-window only exists in legacy mode; in
                     // slots mode there's no separate window to close.
                     if (LegacyMode
@@ -664,7 +665,7 @@ namespace VerdantsAscent.Managers
                 // selection is just a normal grid-item interaction.
                 if (LegacyMode && isPlayerGrid && IsBackpack(item) && containerOpen)
                 {
-                    Debug.Log($"{MyMod.PluginName}: Selected backpack item while container open - closing container");
+                    VabLog.Line($"{MyMod.PluginName}: Selected backpack item while container open - closing container");
                     CloseBackpackContainer();
                     return false; // Prevent normal selection behavior (no drag start)
                 }
@@ -697,7 +698,7 @@ namespace VerdantsAscent.Managers
             if (container == null) return;
 
             InventoryGui.instance.Show(container);
-            Debug.Log($"{MyMod.PluginName}: Backpack container shown");
+            VabLog.Line($"{MyMod.PluginName}: Backpack container shown");
         }
 
         private static void CloseBackpackContainer()
@@ -706,7 +707,7 @@ namespace VerdantsAscent.Managers
             InventoryGui.instance.m_container.gameObject.SetActive(false);
             FieldInfo firstUpdateField = typeof(InventoryGui).GetField("m_firstContainerUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
             firstUpdateField?.SetValue(InventoryGui.instance, true);
-            Debug.Log($"{MyMod.PluginName}: Backpack container closed");
+            VabLog.Line($"{MyMod.PluginName}: Backpack container closed");
         }
 
         // LEGACY-MODE ONLY: tracks which backpack ItemData currently
@@ -721,7 +722,7 @@ namespace VerdantsAscent.Managers
 
         public static void OnEquipItem(Player player, ItemDrop.ItemData item)
         {
-            Debug.Log($"{MyMod.PluginName}: OnEquipItem called for {item?.m_shared.m_name} (prefab: {item?.m_dropPrefab.name})");
+            VabLog.Line($"{MyMod.PluginName}: OnEquipItem called for {item?.m_shared.m_name} (prefab: {item?.m_dropPrefab.name})");
             if (player == null || item == null || !IsBackpack(item)) return;
 
             if (!_configs.TryGetValue(item.m_dropPrefab.name, out var config))
@@ -744,7 +745,7 @@ namespace VerdantsAscent.Managers
                 {
                     // At character load the worn bags are equipped again before VAInventory switches VABackpacks out of
                     // legacy mode, so there is no legacy Container yet; VAInventory takes the storage over right after. Harmless.
-                    if (ConfigManager.Instance?.configVerboseLogging?.Value == true) Debug.Log($"{MyMod.PluginName}: no legacy Container on the player during equip (load-time, before VAInventory takes over storage)");
+                    if (ConfigManager.Instance?.configVerboseLogging?.Value == true) VabLog.Line($"{MyMod.PluginName}: no legacy Container on the player during equip (load-time, before VAInventory takes over storage)");
                 }
                 else
                 {
@@ -772,7 +773,7 @@ namespace VerdantsAscent.Managers
                                 var savePkg = new ZPackage();
                                 existingInv.Save(savePkg);
                                 _activeContainerOwner.m_customData["BackpackInventory"] = savePkg.GetBase64();
-                                Debug.Log($"{MyMod.PluginName}: Saved displaced backpack '{_activeContainerOwner.m_shared?.m_name}' " +
+                                VabLog.Line($"{MyMod.PluginName}: Saved displaced backpack '{_activeContainerOwner.m_shared?.m_name}' " +
                                           $"({existingInv.GetAllItems().Count} items) before equipping '{item.m_shared.m_name}'");
                             }
                         }
@@ -795,7 +796,7 @@ namespace VerdantsAscent.Managers
                     {
                         ZPackage pkg = new ZPackage(customData);
                         backpackInv.Load(pkg);
-                        Debug.Log($"{MyMod.PluginName}: Loaded backpack inventory from custom data");
+                        VabLog.Line($"{MyMod.PluginName}: Loaded backpack inventory from custom data");
                     }
 
                     // Track the new owner so the next equip can save
@@ -808,13 +809,13 @@ namespace VerdantsAscent.Managers
             // both modes so any other consumer can react too.
             BackpackApi.FireEquipped(player, item, config);
 
-            Debug.Log($"{MyMod.PluginName}: SUCCESS - Equipped {item.m_dropPrefab.name} ({config.Columns}x{config.Rows}) " +
+            VabLog.Info($"{MyMod.PluginName}: SUCCESS - Equipped {item.m_dropPrefab.name} ({config.Columns}x{config.Rows}) " +
                       $"as '{item.m_shared.m_name}' [{(LegacyMode ? "legacy" : "slots")} mode]");
         }
 
         public static void OnUnequipItem(Player player, ItemDrop.ItemData item)
         {
-            Debug.Log($"{MyMod.PluginName}: OnUnequipItem called for {item?.m_shared.m_name} (prefab: {item?.m_dropPrefab.name})");
+            VabLog.Line($"{MyMod.PluginName}: OnUnequipItem called for {item?.m_shared.m_name} (prefab: {item?.m_dropPrefab.name})");
             if (player == null || item == null || !IsBackpack(item)) return;
 
             // Storage drain: only in legacy mode does this manager own the
@@ -833,7 +834,7 @@ namespace VerdantsAscent.Managers
                         ZPackage pkg = new ZPackage();
                         inv.Save(pkg);
                         item.m_customData["BackpackInventory"] = pkg.GetBase64();
-                        Debug.Log($"{MyMod.PluginName}: Saved backpack inventory to custom data");
+                        VabLog.Line($"{MyMod.PluginName}: Saved backpack inventory to custom data");
 
                         inv.GetAllItems().Clear();
                     }
@@ -857,7 +858,7 @@ namespace VerdantsAscent.Managers
             // legacy bookkeeping above).
             BackpackApi.FireUnequipped(player, item);
 
-            Debug.Log($"{MyMod.PluginName}: Unequipped {item.m_dropPrefab.name} [{(LegacyMode ? "legacy" : "slots")} mode]");
+            VabLog.Info($"{MyMod.PluginName}: Unequipped {item.m_dropPrefab.name} [{(LegacyMode ? "legacy" : "slots")} mode]");
         }
 
         private static void ApplyEffects(Player player, BackpackConfig config, bool add)
@@ -1000,7 +1001,7 @@ namespace VerdantsAscent.Managers
             if (Player.m_localPlayer == null || InventoryGui.instance == null) return;
 
             // Raw hotkeys wait while a text field has input.
-            if (!IsFiresInputCaptured() && Input.GetKeyDown(ConfigManager.Instance.configBackpackHotkey.Value))
+            if (Input.GetKeyDown(ConfigManager.Instance.configBackpackHotkey.Value) && !IsFiresInputCaptured())   /* 1.0.131 (B4): the key first, the reflection gate only on a press */
             {
                 // Never fire the hotkey while another UI owns input. Opening/closing the
                 // backpack (InventoryGui.Show/Hide) under an open chat box, escape menu,
@@ -1012,7 +1013,7 @@ namespace VerdantsAscent.Managers
                 if (IsBlockingUiOpen())
                     return;
 
-                Debug.Log($"{MyMod.PluginName}: Backpack hotkey pressed");
+                VabLog.Line($"{MyMod.PluginName}: Backpack hotkey pressed");
                 // LEGACY-ONLY: hotkey opens the backpack-as-container window.
                 // In slots mode the backpack contents are visible in the
                 // equipment panel whenever inventory is open, so a separate
@@ -1031,17 +1032,17 @@ namespace VerdantsAscent.Managers
                 ItemDrop.ItemData equippedBackpack = FindEquippedBackpack(player);
                 if (equippedBackpack != null)
                 {
-                    Debug.Log($"{MyMod.PluginName}: Backpack equipped - opening via reflection");
+                    VabLog.Line($"{MyMod.PluginName}: Backpack equipped - opening via reflection");
                     Container container = player.gameObject.GetComponent<Container>();
                     if (container != null)
                     {
                         InventoryGui.instance.Show(container);
-                        Debug.Log($"{MyMod.PluginName}: Backpack opened via hotkey (reflection)");
+                        VabLog.Line($"{MyMod.PluginName}: Backpack opened via hotkey (reflection)");
                     }
                 }
                 else
                 {
-                    Debug.Log($"{MyMod.PluginName}: No backpack equipped on hotkey press");
+                    VabLog.Line($"{MyMod.PluginName}: No backpack equipped on hotkey press");
                 }
             }
         }
@@ -1077,7 +1078,7 @@ namespace VerdantsAscent.Managers
                 var t = AccessTools.TypeByName("FiresCore.Input.FiresInputBlock");
                 _firesIsTyping = t?.GetMethod("IsTyping", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
                 _firesIsCapturingProp = t?.GetProperty("IsCapturing", BindingFlags.Public | BindingFlags.Static);
-                Debug.Log($"[VABackpacks] typing gate: {(_firesIsTyping != null ? "Core FiresInputBlock.IsTyping()" : _firesIsCapturingProp != null ? "Core FiresInputBlock.IsCapturing (older Core)" : "none (no Core)")}");
+                VabLog.Line($"[VABackpacks] typing gate: {(_firesIsTyping != null ? "Core FiresInputBlock.IsTyping()" : _firesIsCapturingProp != null ? "Core FiresInputBlock.IsCapturing (older Core)" : "none (no Core)")}");
             }
             try
             {
@@ -1102,7 +1103,7 @@ namespace VerdantsAscent.Managers
                 int rows = ConfigManager.Instance.configBackpackRows[prefabName].Value;
                 int cols = ConfigManager.Instance.configBackpackColumns[prefabName].Value;
                 if (cfg.Rows == rows && cfg.Columns == cols) continue;
-                Debug.Log($"{MyMod.PluginName}: {prefabName} grid {cfg.Columns}x{cfg.Rows} -> {cols}x{rows} (applies on its next equip)");
+                VabLog.Line($"{MyMod.PluginName}: {prefabName} grid {cfg.Columns}x{cfg.Rows} -> {cols}x{rows} (applies on its next equip)");
                 cfg.Rows = rows;
                 cfg.Columns = cols;
             }

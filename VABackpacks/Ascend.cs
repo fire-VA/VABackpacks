@@ -21,10 +21,23 @@ namespace VerdantsAscent
         public static readonly Harmony harmony = new Harmony("com.Fire.VA_Backpacks");
         public const string PluginGUID = "com.Fire.VA_Backpacks";
         public const string PluginName = "VABackpacks";
-        public const string PluginVersion = "1.0.95";
+        public const string PluginVersion = "1.0.153";   // 1.0.153 ([generator], piece-create audit row 10, 11-08): the camp wood-pile WearNTear.Awake postfix returns on the prefab hash (wood_stack only) before the marker lookup.1.0.152 ([generator], Fire 11-05 perf pass): camp counter OnGUI only while shown, camp chest Update stops after loading, bag tick keeps its list, Hopper worn check at 0.5 s; [Performance] keys, default ON. 1.0.151 never shipped. 1.0.150 ([generator], Fire 11-05): per-staff proof lines removed, proven, they repeat on every ObjectDB load; start-up results and one-time player events at Info. 1.0.147 ([generator], Fire 11-03): routine lines to Debug through VabLog; warnings and errors unchanged. 1.0.146 ([seasons], Fire 10-31 "primary lmb attack does not shoot a projectile anymore"): the styled projectile + costs EarlyMagic sets are carried onto the staff's own Attack before the StaffFireball clone (1.0.145 cloned a NULL projectile on every rebuild). 1.0.145: 1.0.145 (= the withdrawn 1.0.144 + the StaffFireball Attack clone) ([seasons], Fire 10-31 "its still doing the mmb attack with normal left click ... find the regression"): every staff primary plays staff_fireball again (as up to 1.0.139; 1.0.140-142 borrowed the two-handed staff_frostorb / staff_thrust casts) on a clone of vanilla StaffFireball's Attack (the 1.0.142 mechanism that reaches the trigger frame); all [EarlyMagic] lines at Debug. 1.0.143: 1.0.143 ([seasons], Fire 10-31: "triggering the secondary attack with normal lmb"): staff controls - LMB always the primary (cancels an aim), HOLD MMB aims, RELEASE MMB casts; the Start log names the secondary cast. 1.0.142: 1.0.142 ([seasons], Fire 10-30, real fix): a borrowed vanilla staff animation runs on a CLONE of its vanilla owner's Attack (ours: projectile + costs). 1.0.141 ([seasons], Fire 10-30): every gem-staff primary uses staff_fireball again (borrowed frostorb/thrust never trigger); one-shot vanilla Attack diff. 1.0.140 ([seasons], Fire 10-30): staff primaries use their animation only if the character's ANIMATOR has that trigger, else the fireball one (the ObjectDB list let staff_frostorb/thrust through). 1.0.139 ([seasons]): Magnet calls inv.Changed() directly (1.0.21 Changed(bool,bool) made Invoke(inv, null) throw). 1.0.138 ([seasons]): staff icons framed on the head (top 30%) + lit by the staff's own gem light colour
         // ConfigSync's floor is a FIXED constant -
         // raise it only when a synced key's name, type or meaning changes (the current synced set: Rows/Columns etc.).
         public const string SyncMinimumVersion = "1.0.52";
+
+        /// <summary>1.0.133: ObjectDB is the full game one (vanilla items + ZNetScene up). The first ObjectDB pass at start-up runs on a
+        /// partial list (no Hammer, no stations), and a later pass makes every recipe / clone; setup warnings on that partial pass were
+        /// noise (Fire's log: 48 + 20 + 1 lines). Warn() logs them only on a full pass; on a partial one a single Info line says so.</summary>
+        internal static bool ObjectDbFull(ObjectDB db) => db != null && ZNetScene.instance != null && db.GetItemPrefab("Hammer") != null;
+        private static bool s_partialSaid;
+        internal static void Warn(ObjectDB db, string msg)
+        {
+            if (ObjectDbFull(db)) { Debug.LogWarning(msg); return; }
+            if (s_partialSaid) return;
+            s_partialSaid = true;
+            VabLog.Line($"{PluginName}: ObjectDB is not the full game one yet (no Hammer / ZNetScene); recipe + clone setup waits for the full pass (first held line: {msg})");
+        }
 
         public static AssetBundle assetBundle;
         public static readonly List<GameObject> piecePrefabs = new List<GameObject>();
@@ -55,7 +68,7 @@ namespace VerdantsAscent
             this.configSync.lockedConfigChanged += ConfigManager.Instance.OnConfigLockChanged;
 
             ConfigManager.Instance.Initialize(Config);
-            BackpackCraftingAndLoot.Bind(Config, configSync); EarlyMagic.Bind(Config, configSync); StaffProjectiles.Bind(Config, configSync); StaffAttackStyles.Bind(Config, configSync); ChestBagRarity.Bind(Config, configSync);
+            BackpackCraftingAndLoot.Bind(Config, configSync); EarlyMagic.Bind(Config, configSync); BagUpgrades.Bind(Config, configSync); StaffProjectiles.Bind(Config, configSync); StaffAttackStyles.Bind(Config, configSync); ChestBagRarity.Bind(Config, configSync);
             VerdantsAscent.Managers.Camp.CampLevels.Bind(Config, configSync); VerdantsAscent.Managers.Camp.CampStorage.Bind(Config, configSync);   // Recipes + chest loot, server-synced
 
             BindConfigsToSync();
@@ -65,7 +78,7 @@ namespace VerdantsAscent
             // The hub Stats tab card (Core 0.2.511+). Wrapped HERE too: with no Core at all, the card class's own type load
             // (its StatRow field) throws before its try/catch can run, and that must not stop the rest of Awake (the 0.1.141 lesson).
             try { VerdantsAscent.Managers.BackpackStatsSection.Register(); }
-            catch (System.Exception e) { UnityEngine.Debug.Log("[VABackpacks] stats: card not registered (" + e.GetBaseException().GetType().Name + ")"); }
+            catch (System.Exception e) { VabLog.Line("[VABackpacks] stats: card not registered (" + e.GetBaseException().GetType().Name + ")"); }
 
             LoadAssets();
 
@@ -97,7 +110,7 @@ namespace VerdantsAscent
             // being lazy-created on first interact.
             VerdantsAscent.Managers.Camp.BackpackCampManager.EnsureExists();
 
-            Debug.Log($"{PluginName}: Init complete (dedicated: {ZNet.instance?.IsDedicated()})");
+            VabLog.Info($"{PluginName}: Init complete (dedicated: {ZNet.instance?.IsDedicated()})");
 
             StartCoroutine(WaitForZNetReady());
         }
@@ -121,7 +134,7 @@ namespace VerdantsAscent
                 try
                 {
                     assetBundle.Unload(true);
-                    Debug.Log($"{PluginName}: AssetBundle unloaded.");
+                    VabLog.Line($"{PluginName}: AssetBundle unloaded.");
                 }
                 catch (Exception ex)
                 {
@@ -154,7 +167,7 @@ namespace VerdantsAscent
         {
             if (assetBundle != null)
             {
-                Debug.Log($"{PluginName}: AssetBundle already loaded.");
+                VabLog.Line($"{PluginName}: AssetBundle already loaded.");
                 return;
             }
 
@@ -167,10 +180,13 @@ namespace VerdantsAscent
 
                 VAPieceManager.LoadPieces("Assets/Custom/VAitems/", PluginName);
 
-                Debug.Log($"{PluginName}: Loaded {itemPrefabs.Count} items, {piecePrefabs.Count} pieces");
+                VabLog.Info($"{PluginName}: Loaded {itemPrefabs.Count} items, {piecePrefabs.Count} pieces");
                 // A headless server drops the bags' render-only meshes / materials (a no-op elsewhere)
                 try { VerdantsAscent.Utilities.DedicatedStrip.Run(itemPrefabs.Concat(piecePrefabs), PluginName); }
                 catch (Exception e) { Debug.LogWarning($"{PluginName}: dedicated strip failed (render data kept): {e.Message}"); }
+                // A client frees the bags' HEAVY worn meshes until a bag is actually shown (a no-op on a headless server)
+                try { VerdantsAscent.Utilities.LazyBagMeshes.Run(itemPrefabs.Concat(piecePrefabs), PluginName); }
+                catch (Exception e) { Debug.LogWarning($"{PluginName}: lazy bag meshes failed (meshes kept loaded): {e.Message}"); }
             }
             catch (Exception ex)
             {
@@ -195,7 +211,7 @@ namespace VerdantsAscent
                 var bundle = AssetBundle.LoadFromFile(path);
                 if (bundle != null)
                 {
-                    Debug.Log($"{PluginName}: AssetBundle loaded from '{BundleFile}' next to the DLL.");
+                    VabLog.Line($"{PluginName}: AssetBundle loaded from '{BundleFile}' next to the DLL.");
                     return bundle;
                 }
                 Debug.LogError($"{PluginName}: '{path}' is there but did not load as an AssetBundle.");
@@ -238,7 +254,7 @@ namespace VerdantsAscent
             }
 
             zNetScene.m_prefabs.RemoveAll(p => p == null);
-            if (added > 0) Debug.Log($"{PluginName}: added {added} prefab(s) to ZNetScene");
+            if (added > 0) VabLog.Line($"{PluginName}: added {added} prefab(s) to ZNetScene");
         }
 
         public static void AddItemsToObjectDB()
@@ -267,7 +283,7 @@ namespace VerdantsAscent
 
                 registered.Add(item.name);
             }
-            if (registered.Count > 0) Debug.Log($"{PluginName}: registered {registered.Count} item(s) in ObjectDB: {string.Join(", ", registered)}");
+            if (registered.Count > 0) VabLog.Line($"{PluginName}: registered {registered.Count} item(s) in ObjectDB: {string.Join(", ", registered)}");
             FixProjectileAttacks();
         }
 
@@ -296,14 +312,14 @@ namespace VerdantsAscent
             if (donor?.m_attackProjectile != null)
             {
                 attack.m_attackProjectile = donor.m_attackProjectile;
-                Debug.Log($"{PluginName}: {item} {which} attack had no projectile; using {donorName}'s '{donor.m_attackProjectile.name}'");
+                VabLog.Line($"{PluginName}: {item} {which} attack had no projectile; using {donorName}'s '{donor.m_attackProjectile.name}'");
             }
-            else Debug.LogWarning($"{PluginName}: {item} {which} attack has no projectile and {donorName} has none to lend; its swings will throw until fixed");
+            else Warn(ObjectDB.instance, $"{PluginName}: {item} {which} attack has no projectile and {donorName} has none to lend; its swings will throw until fixed");
         }
 
         private IEnumerator WaitForZNetReady()
         {
-            Debug.Log($"{PluginName}: Waiting for ZNetScene & ObjectDB...");
+            VabLog.Line($"{PluginName}: Waiting for ZNetScene & ObjectDB...");
 
             while (ZNetScene.instance == null || ObjectDB.instance == null)
                 yield return null;
@@ -319,7 +335,7 @@ namespace VerdantsAscent
             VAPieceManager.AddPiecesToHammer();
             VARecipeManager.UpdatePieceRequirements();
 
-            Debug.Log($"{PluginName}: All items & pieces fully registered — ready!");
+            VabLog.Info($"{PluginName}: All items & pieces fully registered — ready!");
         }
 
         public enum CraftingStationType
@@ -341,9 +357,10 @@ namespace VerdantsAscent
             {
                 if (!IsObjectDBValid()) return;
 
-                AddItemsToObjectDB();
-                BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance);
-                FiresCore.Materials.VanillaShaderRebind.RebindPrefabs(itemPrefabs.Concat(piecePrefabs), PluginName);
+                // 1.0.132 (load/save audit M12): each step caught on its own, so a throw never skips the others / later postfixes
+                try { AddItemsToObjectDB(); } catch (Exception e) { Debug.LogWarning($"[VABackpacks] CopyOtherDB: AddItemsToObjectDB failed: {e}"); }
+                try { BackpackCraftingAndLoot.AddRecipes(ObjectDB.instance); } catch (Exception e) { Debug.LogWarning($"[VABackpacks] CopyOtherDB: AddRecipes failed: {e}"); }
+                try { FiresCore.Materials.VanillaShaderRebind.RebindPrefabs(itemPrefabs.Concat(piecePrefabs), PluginName); } catch (Exception e) { Debug.LogWarning($"[VABackpacks] CopyOtherDB: shader rebind failed: {e}"); }
             }
         }
 
@@ -354,8 +371,9 @@ namespace VerdantsAscent
             public static void Prefix(ZNetScene __instance)
             {
                 if (__instance == null) return;
-                AddPrefabsToZNetScene(__instance);
-                FiresCore.Materials.VanillaShaderRebind.RebindPrefabs(itemPrefabs.Concat(piecePrefabs), PluginName);
+                // 1.0.132 (load/save audit M11): a throw in a ZNetScene.Awake PREFIX skipped vanilla's Awake (no world); now caught
+                try { AddPrefabsToZNetScene(__instance); } catch (Exception e) { Debug.LogWarning($"[VABackpacks] ZNetScene.Awake: AddPrefabsToZNetScene failed: {e}"); }
+                try { FiresCore.Materials.VanillaShaderRebind.RebindPrefabs(itemPrefabs.Concat(piecePrefabs), PluginName); } catch (Exception e) { Debug.LogWarning($"[VABackpacks] ZNetScene.Awake: shader rebind failed: {e}"); }
             }
         }
 

@@ -332,7 +332,7 @@ namespace VerdantsAscent.Managers.Camp
             _useDrop = drop;
             _useStart = Time.unscaledTime;
             _useFired = false;
-            Debug.Log($"[VABackpacks] camp hold-Use: started on dropped {drop?.m_itemData?.m_dropPrefab?.name ?? "?"} (hold {ConfigManager.Instance.configCampHoldDuration.Value:0.#} s to deploy, release earlier = pickup)");
+            VabLog.Line($"[VABackpacks] camp hold-Use: started on dropped {drop?.m_itemData?.m_dropPrefab?.name ?? "?"} (hold {ConfigManager.Instance.configCampHoldDuration.Value:0.#} s to deploy, release earlier = pickup)");
             // Ask for the drop the vanilla way (ItemDrop.RequestOwn, as a pickup does) while E is held, so the
             // deploy can take it out of the world as its owner.
             RequestDropOwnership(drop);
@@ -369,7 +369,7 @@ namespace VerdantsAscent.Managers.Camp
                 if (tapId != ZDOID.None)
                 {
                     bool gone = DestroyedOrQueued(tapId);
-                    Debug.Log($"[VABackpacks] tap pickup: drop {tapId} {(gone ? "destroyed (gone or queued)" : "still in the world (not owner yet; vanilla asked for it)")}");
+                    VabLog.Line($"[VABackpacks] tap pickup: drop {tapId} {(gone ? "destroyed (gone or queued)" : "still in the world (not owner yet; vanilla asked for it)")}");
                     if (gone) StartCoroutine(CheckPickupStaysGone(tapId));
                 }
                 return false;
@@ -380,7 +380,7 @@ namespace VerdantsAscent.Managers.Camp
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.TopLeft, $"Deploying camp... {Mathf.Max(0f, duration - elapsed):F1}s");
             if (elapsed < duration) return true;
             _useFired = true;
-            Debug.Log($"[VABackpacks] camp hold-Use: held {elapsed:0.0} s, deploying {_useDrop?.m_itemData?.m_dropPrefab?.name ?? "?"}");
+            VabLog.Line($"[VABackpacks] camp hold-Use: held {elapsed:0.0} s, deploying {_useDrop?.m_itemData?.m_dropPrefab?.name ?? "?"}");
             try { DeployFromItemDrop(_useDrop); }
             catch (Exception ex) { Debug.LogError($"[VABackpacks] Camp deploy (hold E) failed: {ex}"); }
             return true;
@@ -460,7 +460,7 @@ namespace VerdantsAscent.Managers.Camp
                 if (blocking.Count > 0)
                 {
                     var first = blocking.OrderBy(pc => (pc.transform.position - site).sqrMagnitude).First();
-                    Debug.Log($"[VABackpacks] camp deploy refused: {blocking.Count} building piece(s) within {clear:0} m of the camp site, nearest {Utils.GetPrefabName(first.gameObject)} at {Vector3.Distance(first.transform.position, site):0.0} m");
+                    VabLog.Line($"[VABackpacks] camp deploy refused: {blocking.Count} building piece(s) within {clear:0} m of the camp site, nearest {Utils.GetPrefabName(first.gameObject)} at {Vector3.Distance(first.transform.position, site):0.0} m");
                     MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, $"Camp NOT deployed: {blocking.Count} building piece(s) within {clear:0} m, nearest {Utils.GetPrefabName(first.gameObject)} {Vector3.Distance(first.transform.position, site):0.0} m away. Move somewhere clear.");
                     return false;
                 }
@@ -477,7 +477,7 @@ namespace VerdantsAscent.Managers.Camp
             if (!dropView.IsOwner())
             {
                 drop.RequestOwn();
-                Debug.Log($"[VABackpacks] camp from dropped bag: drop {dropId} is still owned by peer {dropView.GetZDO().GetOwner()}; " +
+                VabLog.Line($"[VABackpacks] camp from dropped bag: drop {dropId} is still owned by peer {dropView.GetZDO().GetOwner()}; " +
                           "ownership requested, nothing deployed.");
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "The bag is still syncing. Hold E on it again.");
                 return false;
@@ -497,8 +497,11 @@ namespace VerdantsAscent.Managers.Camp
             var state = new DeployState();
             try
             {
-                int moved = BuildCamp(player, item, dropPos, backpackPrefab, cfg, state);
-                Debug.Log($"[VABackpacks] camp from dropped bag: drop {dropId} destroyed, contents {moved} moved");
+                CampFrame.Begin(dropPos);   // 1.0.129: on a halo ring the camp is built in the ring's frame
+                int moved;
+                try { moved = BuildCamp(player, item, dropPos, backpackPrefab, cfg, state); }
+                finally { CampFrame.End(); }
+                VabLog.Line($"[VABackpacks] camp from dropped bag: drop {dropId} destroyed, contents {moved} moved");
                 StartCoroutine(CheckDropStaysGone(dropId));
                 return true;
             }
@@ -507,7 +510,7 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogError($"[VABackpacks] Camp deploy failed, rolling back: {ex}");
                 RollBackDeploy(player, state);
                 ItemDrop back = ItemDrop.DropItem(item, 0, dropPos, dropRot);
-                Debug.Log($"[VABackpacks] camp from dropped bag: deploy rolled back, {backpackPrefab} back on the ground as {GetZdoId(back != null ? back.gameObject : null)} (drop {dropId} was taken)");
+                VabLog.Line($"[VABackpacks] camp from dropped bag: deploy rolled back, {backpackPrefab} back on the ground as {GetZdoId(back != null ? back.gameObject : null)} (drop {dropId} was taken)");
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "Camp deploy failed. Your bag is back on the ground.");
                 return false;
             }
@@ -569,7 +572,7 @@ namespace VerdantsAscent.Managers.Camp
                 }
             }
             catch { }
-            Debug.Log($"[VABackpacks] Rollback: removed {st.Spawned.Count} camp object(s)");
+            VabLog.Line($"[VABackpacks] Rollback: removed {st.Spawned.Count} camp object(s)");
         }
 
         // ZNetScene.Destroy only QUEUES the owner's ZDO (ZDOMan.DestroyZDO adds it to m_destroySendList; the ZDO is
@@ -588,7 +591,7 @@ namespace VerdantsAscent.Managers.Camp
         {
             yield return new WaitForSeconds(2f);
             bool back = ZDOMan.instance?.GetZDO(id) != null && !DestroyedOrQueued(id) || ZNetScene.instance?.FindInstance(id) != null;
-            Debug.Log($"[VABackpacks] tap pickup: drop {id} {(back ? "CAME BACK after 2 s" : "still gone after 2 s")}");
+            VabLog.Line($"[VABackpacks] tap pickup: drop {id} {(back ? "CAME BACK after 2 s" : "still gone after 2 s")}");
         }
 
         // A drop that comes back after the camp took its bag (a ZDO a peer re-sent) is a duplicate: remove it again.
@@ -599,7 +602,7 @@ namespace VerdantsAscent.Managers.Camp
             var inst = ZNetScene.instance?.FindInstance(id);
             if ((zdo == null || DestroyedOrQueued(id)) && inst == null)
             {
-                Debug.Log($"[VABackpacks] camp from dropped bag: drop {id} still gone after 2 s");
+                VabLog.Line($"[VABackpacks] camp from dropped bag: drop {id} still gone after 2 s");
                 yield break;
             }
             Debug.LogWarning($"[VABackpacks] camp from dropped bag: drop {id} CAME BACK (zdo {zdo != null}, object {inst != null}); removing it again");
@@ -620,7 +623,7 @@ namespace VerdantsAscent.Managers.Camp
             float minSep = fcfg.configCampMinSeparation.Value;
             float fireOffset = fcfg.configCampFireOffsetForward.Value;
 
-            Vector3 forward = player.transform.forward;
+            Vector3 forward = CampFrame.DirToLocal(player.transform.forward);   // 1.0.129: the ring frame's forward on a halo ring
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
             else forward.Normalize();
@@ -755,7 +758,7 @@ namespace VerdantsAscent.Managers.Camp
             bool spawnCook      = !useBlueprint || fcfg.configCampBlueprintSpawnCookingStation.Value;
             bool spawnFire      = !useBlueprint || fcfg.configCampBlueprintSpawnFire.Value;
             bool spawnWorkbench = !useBlueprint || fcfg.configCampBlueprintSpawnWorkbench.Value;
-            bool spawnTerrain   = !useBlueprint || fcfg.configCampBlueprintSpawnTerrainPatch.Value;
+            bool spawnTerrain   = (!useBlueprint || fcfg.configCampBlueprintSpawnTerrainPatch.Value) && !CampFrame.Active;   // 1.0.129: no level / paint / capture on a halo ring (those write world-Y heights)
 
             var bedPrefab     = spawnBed   ? SafeGetPrefab(fcfg.configCampBedPrefab.Value)            : null;
             var woodPrefab    = spawnWood  ? SafeGetPrefab(fcfg.configCampWoodpilePrefab.Value)       : null;
@@ -793,7 +796,7 @@ namespace VerdantsAscent.Managers.Camp
             float levelReach = CampTerrainCarry.LevelReach(campCenter, terrainRadius, campCenter.y);
             float captureRadius = levelReach > 0f ? levelReach + 1.5f + 1.5f : terrainRadius;
             float saveRadius = Mathf.Min(48f, Mathf.Max(captureRadius, CampLevels.Radius(CampLevels.Level(item))));
-            Debug.Log($"[VABackpacks] camp save radius {saveRadius:0.0} m (level {terrainRadius:0.0} m, FAT reach {(levelReach > 0f ? levelReach.ToString("0.0") + " m" : "n/a (FAT < 0.2.914)")}, ring {CampLevels.Radius(CampLevels.Level(item)):0.0} m)");
+            VabLog.Line($"[VABackpacks] camp save radius {saveRadius:0.0} m (level {terrainRadius:0.0} m, FAT reach {(levelReach > 0f ? levelReach.ToString("0.0") + " m" : "n/a (FAT < 0.2.914)")}, ring {CampLevels.Radius(CampLevels.Level(item)):0.0} m)");
             st.SaveRadius = saveRadius;
             string terrainSnapshotB64 = string.Empty;
             GameObject terrainGo = null;     // legacy fallback only
@@ -813,7 +816,7 @@ namespace VerdantsAscent.Managers.Camp
                     {
                         float before = GroundAtForLog(campCenter);
                         CampTerrainCarry.Level(campCenter, terrainRadius, campCenter.y, 1, "camp level");
-                        Debug.Log($"[VABackpacks] camp terrain write: camp level (set to y) at ({campCenter.x:0.0},{campCenter.z:0.0}) r {terrainRadius:0.0} m, target y {campCenter.y:0.00}, ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00} (FAT; before the pieces are placed)");
+                        VabLog.Line($"[VABackpacks] camp terrain write: camp level (set to y) at ({campCenter.x:0.0},{campCenter.z:0.0}) r {terrainRadius:0.0} m, target y {campCenter.y:0.00}, ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00} (FAT; before the pieces are placed)");
                     }
                     else
                     {
@@ -858,15 +861,15 @@ namespace VerdantsAscent.Managers.Camp
                 RegisterVegetationClearArea(campCenter, Mathf.Max(terrainRadius, CampLevels.Radius(CampLevels.Level(item))));   // The clearing follows the camp level
                 st.VegetationRegistered = true;
             }
-            st.Center = campCenter;
+            st.Center = CampFrame.Pos(campCenter);
             // The ground the player shaped at the last camp, stamped around this one at this facing.
             // Applied here, after the
             // single level and before any piece is placed; the placement probe reads the voxel field this leaves (FAT writes the
             // density at once; its rebuild / heal only remeshes). No terrain write after the pieces on voxel ground.
             {
                 float before = GroundAtForLog(campCenter);
-                CampTerrainCarry.Apply(item, campCenter, CampLayout.YawOf(forward));
-                Debug.Log($"[VABackpacks] camp terrain write: the camp's saved edits (step 2 of 3) at ({campCenter.x:0.0},{campCenter.z:0.0}), ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00}; the pieces are placed next, on this ground");
+                if (!CampFrame.Active) CampTerrainCarry.Apply(item, campCenter, CampLayout.YawOf(forward));   // 1.0.129: no terrain writes on a halo ring
+                VabLog.Line($"[VABackpacks] camp terrain write: the camp's saved edits (step 2 of 3) at ({campCenter.x:0.0},{campCenter.z:0.0}), ground at the centre {before:0.00} -> {GroundAtForLog(campCenter):0.00}; the pieces are placed next, on this ground");
             }
 
             // Now snap each piece's y to ground. After the level pass
@@ -920,9 +923,9 @@ namespace VerdantsAscent.Managers.Camp
                 if (woodPrefab != null && !layout.ContainsKey("woodpile")) { woodPrefab = null; gone.Add("woodpile"); }
                 if (chairPrefab != null && !layout.ContainsKey("chair")) { chairPrefab = null; gone.Add("chair"); }
                 if (cookPrefab != null && !layout.ContainsKey("cook")) { cookPrefab = null; gone.Add("cook"); }
-                if (gone.Count > 0) Debug.Log($"[VABackpacks] camp layout: removed by the player, not placed: {string.Join(", ", gone)}");
+                if (gone.Count > 0) VabLog.Line($"[VABackpacks] camp layout: removed by the player, not placed: {string.Join(", ", gone)}");
             }
-            Debug.Log(layout.Count == 0
+            VabLog.Line(layout.Count == 0
                 ? $"[VABackpacks] camp layout: none saved in the bag; camp pieces placed around the fire (facing {campYaw:0})"
                 : $"[VABackpacks] camp layout: {fromLayout} camp piece(s) from the bag's saved layout, turned to facing {campYaw:0}");
 
@@ -933,14 +936,14 @@ namespace VerdantsAscent.Managers.Camp
                 var placed = new System.Collections.Generic.List<CampGround.Placed>();
                 var leftOut = new System.Collections.Generic.List<string>();
                 string line;
-                CampGround.Place("chest", chestPrefab, ref chestPos, campCenter, placed, true, out line); Debug.Log(line);
+                CampGround.Place("chest", chestPrefab, ref chestPos, campCenter, placed, true, out line); VabLog.Line(line);
                 if (spawnFire && !CampGround.Place("fire", firePrefab, ref firePos, campCenter, placed, false, out line)) { spawnFire = false; leftOut.Add("fire"); }
-                Debug.Log(line);
+                VabLog.Line(line);
                 if (spawnWorkbench && !CampGround.Place("workbench", wbPrefab, ref workbenchPos, campCenter, placed, false, out line)) { spawnWorkbench = false; leftOut.Add("workbench"); }
-                if (spawnWorkbench || leftOut.Contains("workbench")) Debug.Log(line);
-                if (bedPrefab != null) { if (!CampGround.Place("bed", bedPrefab, ref bedPos, campCenter, placed, false, out line)) { bedPrefab = null; leftOut.Add("bed"); } Debug.Log(line); }
-                if (woodPrefab != null) { if (!CampGround.Place("woodpile", woodPrefab, ref woodpilePos, campCenter, placed, false, out line)) { woodPrefab = null; leftOut.Add("woodpile"); } Debug.Log(line); }
-                if (chairPrefab != null) { if (!CampGround.Place("chair", chairPrefab, ref chairPos, campCenter, placed, false, out line)) { chairPrefab = null; leftOut.Add("chair"); } Debug.Log(line); }
+                if (spawnWorkbench || leftOut.Contains("workbench")) VabLog.Line(line);
+                if (bedPrefab != null) { if (!CampGround.Place("bed", bedPrefab, ref bedPos, campCenter, placed, false, out line)) { bedPrefab = null; leftOut.Add("bed"); } VabLog.Line(line); }
+                if (woodPrefab != null) { if (!CampGround.Place("woodpile", woodPrefab, ref woodpilePos, campCenter, placed, false, out line)) { woodPrefab = null; leftOut.Add("woodpile"); } VabLog.Line(line); }
+                if (chairPrefab != null) { if (!CampGround.Place("chair", chairPrefab, ref chairPos, campCenter, placed, false, out line)) { chairPrefab = null; leftOut.Add("chair"); } VabLog.Line(line); }
                 // the grill sits on the fire wherever the fire went (a saved grill spot is relative to the old fire)
                 if (cookPrefab != null) { if (!spawnFire) { cookPrefab = null; leftOut.Add("cooking station (no fire)"); } else cookPosSaved = firePos + Vector3.up * 0.05f; }
                 if (leftOut.Count > 0)
@@ -951,19 +954,19 @@ namespace VerdantsAscent.Managers.Camp
             // blueprint toggles — without a blueprint both spawn; with a
             // blueprint each only spawns when its toggle is true.
             GameObject fireGo = spawnFire
-                ? UnityEngine.Object.Instantiate(firePrefab, firePos, fireRot)
+                ? UnityEngine.Object.Instantiate(firePrefab, CampFrame.Pos(firePos), CampFrame.Rot(fireRot))
                 : null;
             GameObject wbGo = spawnWorkbench
-                ? UnityEngine.Object.Instantiate(wbPrefab, workbenchPos, wbRot)
+                ? UnityEngine.Object.Instantiate(wbPrefab, CampFrame.Pos(workbenchPos), CampFrame.Rot(wbRot))
                 : null;
-            var chestGo = UnityEngine.Object.Instantiate(chestPrefab, chestPos, chestRot);
+            var chestGo = UnityEngine.Object.Instantiate(chestPrefab, CampFrame.Pos(chestPos), CampFrame.Rot(chestRot));
             st.Spawned.Add(fireGo);
             st.Spawned.Add(wbGo);
             // The workbench must be a working vanilla station.
             if (wbGo != null)
             {
                 var station = wbGo.GetComponent<CraftingStation>();
-                Debug.Log(station == null
+                VabLog.Line(station == null
                     ? $"[VABackpacks] camp workbench: {wbPrefab.name} has NO CraftingStation; it gives no build range"
                     : $"[VABackpacks] camp workbench: {station.m_name}, build range {station.m_rangeBuild:0.#} m, ZDO valid {wbGo.GetComponent<ZNetView>()?.IsValid() == true}");
                 if (station != null) StartCoroutine(CheckStationLater(station));
@@ -980,18 +983,18 @@ namespace VerdantsAscent.Managers.Camp
             if (bedPrefab != null)
             {
                 Quaternion bedRot = bedRotSaved ?? Quaternion.LookRotation(bedPos - firePos);
-                bedGo = UnityEngine.Object.Instantiate(bedPrefab, bedPos, bedRot);
+                bedGo = UnityEngine.Object.Instantiate(bedPrefab, CampFrame.Pos(bedPos), CampFrame.Rot(bedRot));
                 st.Spawned.Add(bedGo);
             }
             // Where the bed went, from the fire and the chest.
-            Debug.Log(bedPrefab == null
+            VabLog.Line(bedPrefab == null
                 ? $"[VABackpacks] camp bed: none ('{fcfg.configCampBedPrefab.Value}' resolved to no prefab, or beds are off for blueprints)"
                 : $"[VABackpacks] camp bed: {bedPrefab.name} at {Vector3.Distance(bedPos, firePos):0.0} m from the fire, {Vector3.Distance(bedPos, chestPos):0.0} m from the chest");
             {
             }
 
             GameObject woodGo = woodPrefab != null
-                ? UnityEngine.Object.Instantiate(woodPrefab, woodpilePos, woodRot)
+                ? UnityEngine.Object.Instantiate(woodPrefab, CampFrame.Pos(woodpilePos), CampFrame.Rot(woodRot))
                 : null;
             st.Spawned.Add(woodGo);
 
@@ -1023,7 +1026,7 @@ namespace VerdantsAscent.Managers.Camp
             if (chairPrefab != null)
             {
                 Quaternion chairRot = chairRotSaved ?? Quaternion.LookRotation(chairPos - firePos);
-                chairGo = UnityEngine.Object.Instantiate(chairPrefab, chairPos, chairRot);
+                chairGo = UnityEngine.Object.Instantiate(chairPrefab, CampFrame.Pos(chairPos), CampFrame.Rot(chairRot));
                 st.Spawned.Add(chairGo);
             }
 
@@ -1033,7 +1036,7 @@ namespace VerdantsAscent.Managers.Camp
             // above the campfire — sitting just barely above ground
             // (0.05m) reads as "resting on the stones".
             GameObject cookGo = cookPrefab != null
-                ? UnityEngine.Object.Instantiate(cookPrefab, cookPosSaved ?? firePos + Vector3.up * 0.05f, cookRotSaved ?? Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0))
+                ? UnityEngine.Object.Instantiate(cookPrefab, CampFrame.Pos(cookPosSaved ?? firePos + Vector3.up * 0.05f), CampFrame.Rot(cookRotSaved ?? Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0)))
                 : null;
             st.Spawned.Add(cookGo);
             // The proof that nothing moved the ground after the pieces (a later rebuild once buried them): 3 s on, once
@@ -1068,11 +1071,11 @@ namespace VerdantsAscent.Managers.Camp
                     float before = GroundAtForLog(at);
                     if (st.VoxelGround) CampTerrainCarry.Level(at, PIECE_PAD_RADIUS, at.y, 1, null);
                     else CampTerrain.Level(at, PIECE_PAD_RADIUS, PIECE_PAD_SMOOTH, at.y);
-                    Debug.Log($"[VABackpacks] camp terrain write: piece pad (set to y) at ({at.x:0.0},{at.z:0.0}) r {PIECE_PAD_RADIUS:0.0} m, target y {at.y:0.00}, ground at its centre {before:0.00} -> {GroundAtForLog(at):0.00} ({(st.VoxelGround ? "FAT" : "heightmap")})");
+                    VabLog.Line($"[VABackpacks] camp terrain write: piece pad (set to y) at ({at.x:0.0},{at.z:0.0}) r {PIECE_PAD_RADIUS:0.0} m, target y {at.y:0.00}, ground at its centre {before:0.00} -> {GroundAtForLog(at):0.00} ({(st.VoxelGround ? "FAT" : "heightmap")})");
                 }
                 // On voxel ground the pieces were placed ON the final ground (the probe), so no pad writes after them (a later
                 // write is what once buried them). Heightmap worlds keep the pads (their snap is the generated ground).
-                if (st.VoxelGround) Debug.Log("[VABackpacks] camp terrain write: no per-piece pads (voxel ground: the pieces sit on the read ground; nothing is written after them)");
+                if (st.VoxelGround) VabLog.Line("[VABackpacks] camp terrain write: no per-piece pads (voxel ground: the pieces sit on the read ground; nothing is written after them)");
                 else
                 try
                 {
@@ -1092,7 +1095,7 @@ namespace VerdantsAscent.Managers.Camp
                     // Heightmap worlds only. On voxel ground a Poke makes
                     // FAT rebuild the zones from heightmap data ("terraform: zone rebuilt ... after its heightmap changed") on top of
                     // the levelled voxel field: the 1-2.6 m mound with every piece under it. FAT heals its own seams there.
-                    if (st.VoxelGround) Debug.Log("[VABackpacks] camp terrain write: no heightmap Poke (voxel ground: FAT owns the seams)");
+                    if (st.VoxelGround) VabLog.Line("[VABackpacks] camp terrain write: no heightmap Poke (voxel ground: FAT owns the seams)");
                     else CampTerrain.RefreshNeighborHeightmaps(campCenter, terrainRadius);
                 }
                 catch (Exception ex)
@@ -1170,7 +1173,7 @@ namespace VerdantsAscent.Managers.Camp
                     worldPos.y += blueprintYOffset;     // per-backpack vertical adjust
                     Quaternion worldRot = blueprintFacing * piece.Rot;
 
-                    var pieceGo = UnityEngine.Object.Instantiate(prefab, worldPos, worldRot);
+                    var pieceGo = UnityEngine.Object.Instantiate(prefab, CampFrame.Pos(worldPos), CampFrame.Rot(worldRot));
                     st.Spawned.Add(pieceGo);
 
                     // Apply blueprint-saved scale. Vanilla Valheim mostly
@@ -1193,7 +1196,7 @@ namespace VerdantsAscent.Managers.Camp
                     if (pieceZ != ZDOID.None) blueprintZdoIds.Add(pieceZ);
                     spawned++;
                 }
-                Debug.Log($"[VABackpacks] Blueprint '{blueprint.Name}' spawned {spawned} pieces " +
+                VabLog.Line($"[VABackpacks] Blueprint '{blueprint.Name}' spawned {spawned} pieces " +
                           $"({missing} missing prefabs, {dataApplied} data blobs applied, " +
                           $"{blueprint.SnapPoints.Count} snap points carried).");
             }
@@ -1226,7 +1229,7 @@ namespace VerdantsAscent.Managers.Camp
             marker.BackpackColumns     = cfg.Columns;
             StampCampUid(item);   // The pack-up finds this exact item again (no second bag while it exists)
             marker.BackpackItemState   = CaptureItemState(item); // Quality, special slots … come back on pack-up
-            marker.CampCenter          = campCenter;     // blueprint center (or fire when procedural)
+            marker.CampCenter          = CampFrame.Pos(campCenter);     // blueprint center (or fire when procedural)
             marker.CampYaw             = st.Yaw;
             marker.GroundBefore        = st.GroundBefore;
             marker.PreCamp             = st.PreCamp;
@@ -1398,7 +1401,7 @@ namespace VerdantsAscent.Managers.Camp
             // The previous 3s clamp made the deploy ~1s late relative
             // to the visible slam.
             float clamped = Mathf.Max(2f, delay);
-            Debug.Log($"[VABackpacks] {prefabName} deploy scheduled in {clamped:F1}s (config={delay:F1}s, clamped to >=2s)");
+            VabLog.Line($"[VABackpacks] {prefabName} deploy scheduled in {clamped:F1}s (config={delay:F1}s, clamped to >=2s)");
             StartCoroutine(SlamDeployCoroutine(player, prefabName, targetPos, clamped));
         }
 
@@ -1552,7 +1555,7 @@ namespace VerdantsAscent.Managers.Camp
                 int blobSize = 0;
                 if (drop.m_itemData.m_customData.TryGetValue(BackpackApi.CUSTOM_DATA_KEY, out var blob))
                     blobSize = blob?.Length ?? 0;
-                Debug.Log($"[VABackpacks] {prefabName} deploy: captured customData with " +
+                VabLog.Line($"[VABackpacks] {prefabName} deploy: captured customData with " +
                           $"{drop.m_itemData.m_customData.Count} entries, BackpackInventory blob size={blobSize}");
             }
             catch (Exception ex)
@@ -1590,14 +1593,14 @@ namespace VerdantsAscent.Managers.Camp
                 // slot weapon), so a removed staff still held is unequipped here, which clears the hand and its visual.
                 if (player.IsItemEquiped(weapon) || player.RightItem == weapon || player.LeftItem == weapon)
                 {
-                    Debug.Log($"[VABackpacks] {prefabName} deploy: the consumed staff was still in the hand; unequipping it (no ghost staff)");
+                    VabLog.Line($"[VABackpacks] {prefabName} deploy: the consumed staff was still in the hand; unequipping it (no ghost staff)");
                     try { player.UnequipItem(weapon, false); }
                     catch (Exception ex) { Debug.LogWarning($"[VABackpacks] {prefabName} deploy: hand clear failed: {ex.Message}"); }
                 }
                 weapon.m_equipped = false;
                 StartCoroutine(CheckHandClear(player, weapon, prefabName));
                 int sameAfter = inv.GetAllItems().Count(it => it?.m_dropPrefab != null && it.m_dropPrefab.name == prefabName);
-                Debug.Log($"[VABackpacks] {prefabName} deploy: consumed the {(weapon == held ? "held" : "first inventory")} one " +
+                VabLog.Line($"[VABackpacks] {prefabName} deploy: consumed the {(weapon == held ? "held" : "first inventory")} one " +
                           $"({sameBefore} -> {sameAfter} in the inventory, right hand now {player.RightItem?.m_dropPrefab?.name ?? "empty"})");
             }
 
@@ -1642,7 +1645,7 @@ namespace VerdantsAscent.Managers.Camp
                 Debug.LogError($"[VABackpacks] {prefabName} deploy failed: {ex}");
             }
             if (!deployed && drop != null)
-                Debug.Log($"[VABackpacks] {prefabName} deploy did not run; the {prefabName} stays on the ground at {targetPos} to pick up.");
+                VabLog.Line($"[VABackpacks] {prefabName} deploy did not run; the {prefabName} stays on the ground at {targetPos} to pick up.");
         }
 
         // The id that ties a camp to the item it was made from. The slam deploy stamps the held weapon before it is
@@ -1671,10 +1674,10 @@ namespace VerdantsAscent.Managers.Camp
         private IEnumerator CheckStationLater(CraftingStation station)
         {
             yield return new WaitForSeconds(1f);
-            if (station == null) { Debug.Log("[VABackpacks] camp workbench: gone 1 s after the deploy"); yield break; }
+            if (station == null) { VabLog.Line("[VABackpacks] camp workbench: gone 1 s after the deploy"); yield break; }
             Vector3 probe = station.transform.position + station.transform.right * 3f;
             bool inRange = CraftingStation.HaveBuildStationInRange(station.m_name, probe);
-            Debug.Log($"[VABackpacks] camp workbench after 1 s: vanilla build-station query 3 m away finds it: {inRange} (range {station.m_rangeBuild:0.#} m)");
+            VabLog.Line($"[VABackpacks] camp workbench after 1 s: vanilla build-station query 3 m away finds it: {inRange} (range {station.m_rangeBuild:0.#} m)");
         }
 
         // A building in the way of a camp is a piece a player built and that stands in the world: a live ZDO, a
@@ -1727,13 +1730,13 @@ namespace VerdantsAscent.Managers.Camp
                     if (c == null || lifted.Contains(c)) continue;
                     Vector3 p = c.transform.position;
                     float ground = ZoneSystem.instance.GetGroundHeight(p);
-                    if (p.y >= ground - 0.3f) continue;
+                    if (p.y >= ground - 0.3f || CampFrame.InField(p)) continue;   // 1.0.129: never on a halo ring (the heightmap is not its floor)
                     Vector3 to = new Vector3(p.x, ground + 0.5f, p.z);
                     c.transform.position = to;
                     var body = c.GetComponent<Rigidbody>();
                     if (body != null) { body.position = to; body.velocity = Vector3.zero; }
                     lifted.Add(c);
-                    Debug.Log($"[VABackpacks] pack-up: lifted {c.GetHoverName()} from y {p.y:0.00} to {to.y:0.00} (below the restored ground)");
+                    VabLog.Line($"[VABackpacks] pack-up: lifted {c.GetHoverName()} from y {p.y:0.00} to {to.y:0.00} (below the restored ground)");
                 }
                 yield return null;
             }
@@ -1763,7 +1766,7 @@ namespace VerdantsAscent.Managers.Camp
                 try { player.UnequipItem(weapon, false); } catch { }
                 weapon.m_equipped = false;
             }
-            Debug.Log($"[VABackpacks] {prefabName} deploy: hand check after 1 s: {(held ? "the consumed staff was held again; unequipped" : "clear")}, right hand {player.RightItem?.m_dropPrefab?.name ?? "empty"}");
+            VabLog.Line($"[VABackpacks] {prefabName} deploy: hand check after 1 s: {(held ? "the consumed staff was held again; unequipped" : "clear")}, right hand {player.RightItem?.m_dropPrefab?.name ?? "empty"}");
         }
 
         /// <summary>
@@ -1917,7 +1920,7 @@ namespace VerdantsAscent.Managers.Camp
                 if (hand != null && hand.GetComponentsInChildren<Renderer>(false).Any(r => r.enabled))
                 {
                     var shown = hand.GetComponentsInChildren<Renderer>(false).Where(r => r.enabled).Select(r => r.name).ToArray();
-                    Debug.Log($"[VABackpacks] camp bag visual: {prefab.name} uses its hand model as authored: {shown.Length} renderer(s) on ({string.Join(", ", shown)}); disabled ones (donor mesh) stay off");
+                    VabLog.Line($"[VABackpacks] camp bag visual: {prefab.name} uses its hand model as authored: {shown.Length} renderer(s) on ({string.Join(", ", shown)}); disabled ones (donor mesh) stay off");
                 }
                 else EnableAllVisuals(visual);
 
@@ -1930,7 +1933,7 @@ namespace VerdantsAscent.Managers.Camp
                 {
                     float ground = GroundHeightAt(visual.transform.position, chestGo, chestGo.transform.position.y, out string from);
                     visual.transform.position += Vector3.up * (ground - wb.min.y);
-                    Debug.Log($"[VABackpacks] camp bag visual: {prefab.name} beside the chest, base on {from} at y={ground:F2} (moved {ground - wb.min.y:+0.00;-0.00} m)");
+                    VabLog.Line($"[VABackpacks] camp bag visual: {prefab.name} beside the chest, base on {from} at y={ground:F2} (moved {ground - wb.min.y:+0.00;-0.00} m)");
                 }
             }
             catch (Exception ex)
@@ -1970,17 +1973,20 @@ namespace VerdantsAscent.Managers.Camp
             if (CampPoses.TryGetValue(prefabName, out CampPose cp))
             {
                 Transform ct = chestGo.transform;
-                Vector3 s = ct.right; s.y = 0f;
+                Vector3 cup = CampFrame.InField(ct.position) ? ct.up : Vector3.up;   // 1.0.129: the chest's own up on a halo ring
+                Vector3 s = Vector3.ProjectOnPlane(ct.right, cup);
                 s = s.sqrMagnitude > 1e-4f ? s.normalized : Vector3.right;
-                Quaternion look = Quaternion.LookRotation(-s, Vector3.up);
+                Quaternion look = Quaternion.LookRotation(-s, cup);
                 Vector3 target = ct.position + s * (ChestHalfWidth(chestGo, s) + 0.02f);
-                target.y = GroundHeightAt(target + s * 0.2f, chestGo, ct.position.y, out string groundFrom);
+                string groundFrom;
+                if (cup == Vector3.up) target.y = GroundHeightAt(target + s * 0.2f, chestGo, ct.position.y, out groundFrom);
+                else { target -= cup * Vector3.Dot(target - ct.position, cup); groundFrom = "the chest's base (halo ring)"; }
                 bag.transform.SetParent(ct, false);
                 bag.transform.rotation = look * Quaternion.Euler(cp.Tilt + BagLeanDegrees, 0f, 0f);
                 bag.transform.position = target - look * new Vector3(cp.CentreX, cp.MinY, cp.MaxZ);
                 Vector3 chestScale = ct.lossyScale;
                 bag.transform.localScale = new Vector3(1f / Mathf.Max(chestScale.x, 1e-3f), 1f / Mathf.Max(chestScale.y, 1e-3f), 1f / Mathf.Max(chestScale.z, 1e-3f));
-                Debug.Log($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {groundFrom} at y={target.y:F2}, " +
+                VabLog.Line($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {groundFrom} at y={target.y:F2}, " +
                           $"{BagLeanDegrees:F0} deg lean (upright {cp.Tilt:F1} deg), top 0.02 m from the chest's side");
                 return;
             }
@@ -1994,21 +2000,24 @@ namespace VerdantsAscent.Managers.Camp
             pose.localPosition = -new Vector3(b.center.x, b.min.y, b.max.z);
 
             Transform chest = chestGo.transform;
-            Vector3 side = chest.right; side.y = 0f;
+            Vector3 cup2 = CampFrame.InField(chest.position) ? chest.up : Vector3.up;   // 1.0.129: the chest's own up on a halo ring
+            Vector3 side = Vector3.ProjectOnPlane(chest.right, cup2);
             side = side.sqrMagnitude > 1e-4f ? side.normalized : Vector3.right;
             float height = b.size.y;
             float gap = height * Mathf.Sin(BagLeanDegrees * Mathf.Deg2Rad) + 0.02f;
             Vector3 spot = chest.position + side * (ChestHalfWidth(chestGo, side) + gap);
-            spot.y = GroundHeightAt(spot, chestGo, chest.position.y, out string from);
+            string from;
+            if (cup2 == Vector3.up) spot.y = GroundHeightAt(spot, chestGo, chest.position.y, out from);
+            else { spot -= cup2 * Vector3.Dot(spot - chest.position, cup2); from = "the chest's base (halo ring)"; }
 
             bag.transform.SetParent(chest, false);
             bag.transform.position = spot;
-            bag.transform.rotation = Quaternion.LookRotation(-side, Vector3.up) * Quaternion.Euler(BagLeanDegrees, 0f, 0f);
+            bag.transform.rotation = Quaternion.LookRotation(-side, cup2) * Quaternion.Euler(BagLeanDegrees, 0f, 0f);
             Vector3 cs = chest.lossyScale;
             bag.transform.localScale = new Vector3(1f / Mathf.Max(cs.x, 1e-3f), 1f / Mathf.Max(cs.y, 1e-3f), 1f / Mathf.Max(cs.z, 1e-3f));
 
             float lowest = TryWorldRendererBounds(bag.transform, out Bounds wb) ? wb.min.y : spot.y;
-            Debug.Log($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {from} at y={spot.y:F2} " +
+            VabLog.Line($"[VABackpacks] camp bag visual: {prefabName} leans on the chest, base on {from} at y={spot.y:F2} " +
                       $"(lowest point {lowest:F2}), {height:F2} m tall, {BagLeanDegrees:F0} deg lean, {gap:F2} m from the chest's side");
         }
 
@@ -2452,7 +2461,7 @@ namespace VerdantsAscent.Managers.Camp
             {
                 var spots = CampLayout.Capture(marker);
                 campLayout = CampLayout.Encode(spots);
-                Debug.Log($"[VABackpacks] camp layout saved: {spots.Count} camp piece(s) ({string.Join(", ", spots.Keys)}), facing {marker.CampYaw:0}");
+                VabLog.Line($"[VABackpacks] camp layout saved: {spots.Count} camp piece(s) ({string.Join(", ", spots.Keys)}), facing {marker.CampYaw:0}");
                 campTerrain = CampTerrainCarry.Capture(CampRing.Centre(marker), marker.CampYaw, CampRing.Radius(marker));   // The same save ring
             }
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp layout capture failed: {ex.Message}"); }
@@ -2487,18 +2496,18 @@ namespace VerdantsAscent.Managers.Camp
                     // player is asked. No = nothing touched; Yes = pack up to the limit and leave the rest standing.
                     if (checkLine.Contains("chest is open"))
                     {
-                        Debug.Log($"[VABackpacks] {checkLine} (pack-up stopped before anything was removed; the camp stays as it is)");
+                        VabLog.Line($"[VABackpacks] {checkLine} (pack-up stopped before anything was removed; the camp stays as it is)");
                         return;
                     }
                     int level = CampLevels.Level(check), cap = CampLevels.PieceCap(level), ringCount = CampCapture.LastInRing;
                     string text = checkLine.Contains("blueprint is")
                         ? $"The buildings in this camp are more data than one bag holds ({ringCount} pieces in the ring). Packing will leave the farthest pieces behind, standing. Pack anyway?"
                         : $"Packing this camp will leave {ringCount - cap} pieces behind ({ringCount} in the ring, the bag holds {cap}). Pack anyway?";
-                    Debug.Log($"[VABackpacks] {checkLine}; asking the player (Yes = pack up to the limit, No = nothing touched)");
+                    VabLog.Line($"[VABackpacks] {checkLine}; asking the player (Yes = pack up to the limit, No = nothing touched)");
                     var target = marker;
                     UnifiedPopup.Push(new YesNoPopup("Camp over its limit", text,
-                        () => { UnifiedPopup.Pop(); Debug.Log("[VABackpacks] pack anyway: Yes"); if (target != null) PackUpCamp(target, packAnyway: true); },
-                        () => { UnifiedPopup.Pop(); Debug.Log("[VABackpacks] pack anyway: No; the camp stays as it is"); },
+                        () => { UnifiedPopup.Pop(); VabLog.Line("[VABackpacks] pack anyway: Yes"); if (target != null) PackUpCamp(target, packAnyway: true); },
+                        () => { UnifiedPopup.Pop(); VabLog.Line("[VABackpacks] pack anyway: No; the camp stays as it is"); },
                         localizeText: false));
                     return;
                 }
@@ -2541,10 +2550,10 @@ namespace VerdantsAscent.Managers.Camp
                 probe.m_customData.TryGetValue(CampUidKey, out campUid);
                 Vector3 ringCentre = CampRing.Centre(marker);
                 float ringRadius = CampRing.Radius(marker);
-                Debug.Log($"[VABackpacks] capture disc centre {ringCentre} radius {ringRadius:0.##} == ring centre {CampRing.Centre(marker)} radius {CampRing.Radius(marker):0.##} (CampRing, one definition)");
+                VabLog.Line($"[VABackpacks] capture disc centre {ringCentre} radius {ringRadius:0.##} == ring centre {CampRing.Centre(marker)} radius {CampRing.Radius(marker):0.##} (CampRing, one definition)");
                 campBlueprint = CampCapture.Capture(player, ringCentre, ringRadius, 0f, CampLevels.Level(probe), out string captureLine, out campStorage,
                     partial: packAnyway, first: marker.DeployedPieceIds);
-                if (captureLine != null) Debug.Log($"[VABackpacks] {captureLine}");
+                if (captureLine != null) VabLog.Line($"[VABackpacks] {captureLine}");
             }
             catch (Exception ex) { Debug.LogError($"[VABackpacks] camp pack-up capture failed: {ex}"); }
 
@@ -2590,7 +2599,7 @@ namespace VerdantsAscent.Managers.Camp
                             try { player.UnequipItem(original, false); } catch { }
                             original.m_equipped = false;
                         }
-                        Debug.Log($"[VABackpacks] Pack-up: the camp's own {marker.BackpackPrefabName} (camp id {campUid}) is still on the player " +
+                        VabLog.Line($"[VABackpacks] Pack-up: the camp's own {marker.BackpackPrefabName} (camp id {campUid}) is still on the player " +
                                   $"({(inInventory ? "in the inventory: the contents go back into it, no new one" : "only in a hand: unequipped as a ghost")})");
                         if (inInventory)
                         {
@@ -2621,7 +2630,7 @@ namespace VerdantsAscent.Managers.Camp
                         CampTerrainCarry.Write(existing, campTerrain);
                         returned = existing;
                         gaveToInventory = true;
-                        Debug.Log($"[VABackpacks] Pack-up: merged contents into existing {marker.BackpackPrefabName} in player inventory (no duplicate spawned).");
+                        VabLog.Line($"[VABackpacks] Pack-up: merged contents into existing {marker.BackpackPrefabName} in player inventory (no duplicate spawned).");
                         break;
                     }
                 }
@@ -2673,16 +2682,17 @@ namespace VerdantsAscent.Managers.Camp
                     }
                     else
                     {
-                        Vector3 feet = player.transform.position + player.transform.forward * 0.6f + Vector3.up * 0.6f;
-                        ItemDrop back = ItemDrop.DropItem(bagItem, 0, feet, Quaternion.identity);
+                        Vector3 bagUp = CampFrame.InField(player.transform.position) ? CampFrame.UpAt(player.transform.position) : Vector3.up;   // 1.0.129: along the ring's up on a halo ring
+                Vector3 feet = player.transform.position + Vector3.ProjectOnPlane(player.transform.forward, bagUp).normalized * 0.6f + bagUp * 0.6f;
+                        ItemDrop back = ItemDrop.DropItem(bagItem, 0, feet, Quaternion.FromToRotation(Vector3.up, bagUp));
                         returned = back != null ? back.m_itemData : bagItem;
                         where = $"a drop at the player's feet {GetZdoId(back != null ? back.gameObject : null)} (the inventory is full)";
                     }
                 }
             }
-            Debug.Log($"[VABackpacks] Pack-up: chest {chestId} destroyed, contents {contentCount} moved into {where}");
+            VabLog.Line($"[VABackpacks] Pack-up: chest {chestId} destroyed, contents {contentCount} moved into {where}");
             if (returned != null)
-                Debug.Log($"[VABackpacks] Pack-up: {marker.BackpackPrefabName} back at quality {returned.m_quality}, " +
+                VabLog.Line($"[VABackpacks] Pack-up: {marker.BackpackPrefabName} back at quality {returned.m_quality}, " +
                           $"{(returned.m_customData?.Keys.Count(k => k.StartsWith(SpecialSlotKeyPrefix, StringComparison.Ordinal)) ?? 0)} special slot(s) filled" +
                           (string.IsNullOrEmpty(state) ? " (a camp from before 1.0.22: its bag's quality and special slots were not kept)" : ""));
 
@@ -2696,7 +2706,7 @@ namespace VerdantsAscent.Managers.Camp
             // A partial pack keeps the ground as it is.
             bool keepGround = packAnyway && CampCapture.LastLeftBehind > 0;
             if (keepGround)
-                Debug.Log($"[VABackpacks] pack-up: {CampCapture.LastLeftBehind} piece(s) left standing, so the ground stays as it is (no restore)");
+                VabLog.Line($"[VABackpacks] pack-up: {CampCapture.LastLeftBehind} piece(s) left standing, so the ground stays as it is (no restore)");
             // The exact pre-camp capture (heightmap + paint + voxel) when the camp has one; the old restores
             // below only for a camp without it (an older FAT at deploy, or an older camp)
             bool exact = !keepGround && CampTerrainCarry.RestorePreCamp(marker.PreCamp, "pack-up");
@@ -3000,7 +3010,7 @@ namespace VerdantsAscent.Managers.Camp
                     }
                 }
                 SaveRecordedPins(player, keepNewest ? recorded.Skip(recorded.Count - 1).ToList() : new List<Vector2>());
-                Debug.Log($"[VABackpacks] camp pins ({why}): {removed} recorded camp pin(s) removed{(keepNewest ? ", the current camp's kept" : "")}; other pins untouched");
+                VabLog.Line($"[VABackpacks] camp pins ({why}): {removed} recorded camp pin(s) removed{(keepNewest ? ", the current camp's kept" : "")}; other pins untouched");
             }
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp pin cleanup ({why}) failed: {ex.Message}"); }
         }
@@ -3105,13 +3115,14 @@ namespace VerdantsAscent.Managers.Camp
             {
                 if (go == null) continue;
                 Vector3 p = go.transform.position;
+                if (CampFrame.InField(p)) { parts.Add($"{role} on the halo ring (not read)"); continue; }
                 float g = GroundAtForLog(p);
                 if (float.IsNaN(g)) { parts.Add($"{role} no read"); continue; }
                 float d = p.y - g;
                 if (Mathf.Abs(d) > Mathf.Abs(worst)) worst = d;
                 parts.Add($"{role} {d:+0.00;-0.00}");
             }
-            Debug.Log($"[VABackpacks] camp ground after 3 s (piece y - ground): {string.Join(", ", parts.ToArray())}; worst {worst:+0.00;-0.00} m{(Mathf.Abs(worst) > 0.15f ? " - OVER 0.15: the ground changed after placement" : "")}");
+            VabLog.Line($"[VABackpacks] camp ground after 3 s (piece y - ground): {string.Join(", ", parts.ToArray())}; worst {worst:+0.00;-0.00} m{(Mathf.Abs(worst) > 0.15f ? " - OVER 0.15: the ground changed after placement" : "")}");
         }
 
         // The ground for the terrain-write lines (the same read as the piece placement)
@@ -3119,6 +3130,9 @@ namespace VerdantsAscent.Managers.Camp
 
         private static Vector3 SnapToGround(Vector3 pos)
         {
+            // 1.0.129: in the ring frame the ground is a ray along the ring's down (the heightmap is not the ring floor)
+            if (CampFrame.Active)
+                return CampFrame.RayDown(pos.x, pos.z, pos.y + 6f, 12f, LayerMask.GetMask("terrain", "Default", "static_solid", "piece"), out float fy, out _) ? new Vector3(pos.x, fy, pos.z) : pos;
             if (ZoneSystem.instance != null
                 && ZoneSystem.instance.GetGroundHeight(pos, out float groundY))
             {
@@ -3180,17 +3194,17 @@ namespace VerdantsAscent.Managers.Camp
                 // An empty bag writes no key: VAInventory's BackpackStorageSync.HandleUnequipped only writes when it captured
                 // items, and a fresh bag has never had one (R77's drill stick). So no key reads as an EMPTY bag, not a loss;
                 // a lost bag would show items in the bag block before the unequip and none after.
-                Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: no saved '{BackpackApi.CUSTOM_DATA_KEY}' in the bag " +
+                VabLog.Line($"[VABackpacks] LoadBackpackContentsIntoContainer: no saved '{BackpackApi.CUSTOM_DATA_KEY}' in the bag " +
                           $"(customData entries: {(backpackItem.m_customData != null ? backpackItem.m_customData.Count : 0)}): an empty bag, so the chest starts empty.");
                 return 0;
             }
-            Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: loading {base64.Length} chars of base64 into chest ({inv.GetWidth()}x{inv.GetHeight()}).");
+            VabLog.Line($"[VABackpacks] LoadBackpackContentsIntoContainer: loading {base64.Length} chars of base64 into chest ({inv.GetWidth()}x{inv.GetHeight()}).");
 
             try
             {
                 var pkg = new ZPackage(base64);
                 inv.Load(pkg);
-                Debug.Log($"[VABackpacks] LoadBackpackContentsIntoContainer: loaded {inv.GetAllItems().Count} items into chest.");
+                VabLog.Line($"[VABackpacks] LoadBackpackContentsIntoContainer: loaded {inv.GetAllItems().Count} items into chest.");
                 return inv.GetAllItems().Count;
             }
             catch (Exception ex)

@@ -156,7 +156,7 @@ namespace VerdantsAscent.Managers
             if (lod != null && state.Parts.Count > 0) UpdateLodgroupMethod?.Invoke(ve, null);
 
             string who = state.Player != null ? state.Player.GetPlayerName() : ve.name;
-            Debug.Log($"{MyMod.PluginName}: worn visual {prefab?.name ?? hash.ToString()} on {who}: " +
+            VabLog.Line($"{MyMod.PluginName}: worn visual {prefab?.name ?? hash.ToString()} on {who}: " +
                       $"{state.Parts.Count} renderer(s) on {(bones.Count > 0 ? string.Join(",", bones) : "no bone")}");
             ItemDrop.ItemData worn = null;
             if (state.Player != null) BackpackManager.TryGetEquippedBackpack(state.Player, out worn);   // owner side; null for another player's bag

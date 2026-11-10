@@ -57,7 +57,7 @@ namespace VerdantsAscent.Managers.Camp
             if (s_pendingDrop != null && Time.realtimeSinceStartup - s_askedAt < AnswerTimeout) return false;   // already asked
             s_pendingDrop = drop; s_retry = retry; s_askedAt = Time.realtimeSinceStartup;
             ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.instance.GetServerPeerID(), RpcAsk, player.GetPlayerID());
-            Debug.Log($"[VABackpacks] camp limit: asked the server for player {player.GetPlayerID()} (answer within {AnswerTimeout:0} s, else the client-side check)");
+            VabLog.Line($"[VABackpacks] camp limit: asked the server for player {player.GetPlayerID()} (answer within {AnswerTimeout:0} s, else the client-side check)");
             MessageHud.instance?.ShowMessage(MessageHud.MessageType.TopLeft, "Checking your camps with the server...");
             if (BackpackCampManager.Instance != null) BackpackCampManager.Instance.StartCoroutine(Timeout(drop));
             return false;
@@ -75,18 +75,29 @@ namespace VerdantsAscent.Managers.Camp
         private static void OnAsk(long sender, long playerId)
         {
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            // SECURITY (10-24): the id must be the SENDER's own player (from its character ZDO), never another player's taken
+            // from the packet. A mismatch is answered "no".
+            long own = OwnPlayerId(sender);
+            if (own != 0L && own != playerId)
+            {
+                Debug.LogWarning($"[VABackpacks] camp limit: peer {sender} asked for player {playerId} but is player {own}; refused");
+                ZRoutedRpc.instance.InvokeRoutedRPC(sender, RpcAnswer, false);
+                return;
+            }
             int live = LiveCampsOf(playerId);
-            Debug.Log($"[VABackpacks] camp limit: player {playerId} asks to deploy; {live} live camp(s) -> {(live == 0 ? "allowed" : "refused")}");
+            VabLog.Line($"[VABackpacks] camp limit: player {playerId} asks to deploy; {live} live camp(s) -> {(live == 0 ? "allowed" : "refused")}");
             ZRoutedRpc.instance.InvokeRoutedRPC(sender, RpcAnswer, live == 0);
         }
 
         // Client: the server's answer.
         private static void OnAnswer(long sender, bool allowed)
         {
+            // SECURITY (10-24): only the server answers; any other peer's "yes" is ignored
+            if (ZRoutedRpc.instance == null || sender != ZRoutedRpc.instance.GetServerPeerID()) return;
             ItemDrop drop = s_pendingDrop;
             if (drop == null) return;
             if (!allowed) { s_pendingDrop = null; Refuse(-1); return; }
-            Debug.Log("[VABackpacks] camp limit: server said yes, deploying");   // The yes is logged so the client shows it
+            VabLog.Line("[VABackpacks] camp limit: server said yes, deploying");   // The yes is logged so the client shows it
             Grant(drop);
         }
 
@@ -103,13 +114,22 @@ namespace VerdantsAscent.Managers.Camp
         private static void Refuse(int live)
         {
             MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, "You already have a camp deployed. Pack it up first.");
-            Debug.Log($"[VABackpacks] camp limit: deploy refused ({(live < 0 ? "server said no" : live + " live camp(s) here")})");
+            VabLog.Line($"[VABackpacks] camp limit: deploy refused ({(live < 0 ? "server said no" : live + " live camp(s) here")})");
         }
 
         private static readonly AccessTools.FieldRef<ZDOMan, Dictionary<ZDOID, ZDO>> ObjectsById =
             AccessTools.FieldRefAccess<ZDOMan, Dictionary<ZDOID, ZDO>>("m_objectsByID");
 
         /// <summary>Camp chests in the world owned by this player (only camp chests carry va_camp_owner).</summary>
+        // The player id of a peer's own character (its Player ZDO's "playerID"); 0 = not known yet (then the packet's id stands).
+        private static long OwnPlayerId(long sender)
+        {
+            var peer = ZNet.instance != null ? ZNet.instance.GetPeer(sender) : null;
+            if (peer == null || peer.m_characterID.IsNone() || ZDOMan.instance == null) return 0L;
+            var zdo = ZDOMan.instance.GetZDO(peer.m_characterID);
+            return zdo != null ? zdo.GetLong(ZDOVars.s_playerID, 0L) : 0L;
+        }
+
         internal static int LiveCampsOf(long playerId)
         {
             if (playerId == 0L || ZDOMan.instance == null) return 0;

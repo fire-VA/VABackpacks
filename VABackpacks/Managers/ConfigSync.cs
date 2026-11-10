@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using System;
@@ -187,18 +187,56 @@ namespace VerdantsAscent
 
         internal void RPC_FromOtherClientConfigSync(long sender, ZPackage package)
         {
+            // security (Core 0.2.759 port): a client takes config values from the server only, never from another client
+            if (!isServer && (ZRoutedRpc.instance == null || sender != ZRoutedRpc.instance.GetServerPeerID()))
+            {
+                Debug.LogWarning($"[{MyMod.PluginName}] Rejected config package for {Name} from peer {sender}: not the server");
+                return;
+            }
+            // the server takes a config push only from an admin (or itself), whether or not the config is locked
+            if (isServer && !IsSenderAdminOnServer(sender))
+            {
+                Debug.LogWarning($"[{MyMod.PluginName}] Rejected config push for {Name} from peer {sender}: not an admin");
+                return;
+            }
             HandleConfigSyncRPC(sender, package, true);
+        }
+
+        // Caps on received config packages (wire format unchanged; senders split at 250 KB per fragment).
+        private const int MaxFragments = 1024;
+        private const int MaxOpenReassemblies = 64;
+        private const int MaxReassembledBytes = 64 * 1024 * 1024;
+        private const int MaxDecompressedBytes = 64 * 1024 * 1024;
+        private const int FragmentCacheLifetimeSeconds = 60;
+
+        private static bool IsSenderAdminOnServer(long sender)
+        {
+            if (ZNet.instance == null) return false;
+            if (sender == ZNet.GetUID()) return true; // the host's own push (listen server)
+            ZNetPeer peer = ZNet.instance.GetPeer(sender);
+            string hostName = peer?.m_socket?.GetHostName();
+            return hostName != null && ZNet.instance.IsAdmin(hostName);
+        }
+
+        private static bool DeliveredByAdmin(long sender)
+        {
+            if (ZNet.instance == null) return false;
+            ZRpc rpc = SnatchCurrentlyHandlingRPC.currentRpc;
+            if (rpc == null) return sender == ZNet.GetUID();
+            string hostName = rpc.GetSocket()?.GetHostName();
+            return !string.IsNullOrEmpty(hostName) && (ZNet.instance.IsAdmin(hostName) || (hostName.IndexOf('_') < 0 && ZNet.instance.IsAdmin("Steam_" + hostName)));
         }
 
         private bool HandleConfigSyncRPC(long sender, ZPackage package, bool clientUpdate)
         {
             try
             {
-                if (isServer && IsLocked)
+                // 1.0.148: the server takes config only from an admin, locked or not. The delivering socket names the sender, not the routed
+                // id, which the client fills in. No socket means this game's own call, the host's push. Only this mod's own keys are read.
+                if (isServer && !DeliveredByAdmin(sender))
                 {
-                    string hostName = SnatchCurrentlyHandlingRPC.currentRpc?.GetSocket()?.GetHostName();
-                    if (hostName != null && !ZNet.instance.IsAdmin(hostName))
-                        return false;
+                    Debug.LogWarning($"[{MyMod.PluginName}] Refused a config change from '{SnatchCurrentlyHandlingRPC.currentRpc?.GetSocket()?.GetHostName()}': not an admin.");
+                    return false;
                 }
 
                 cacheExpirations.RemoveAll(kv => kv.Key < DateTimeOffset.Now.Ticks && configValueCache.Remove(kv.Value));
@@ -214,12 +252,26 @@ namespace VerdantsAscent
                     {
                         fragments = new SortedDictionary<int, byte[]>();
                         configValueCache[cacheKey] = fragments;
-                        cacheExpirations.Add(new KeyValuePair<long, string>(DateTimeOffset.Now.Ticks + 60 * TimeSpan.TicksPerSecond, cacheKey));
+                        cacheExpirations.Add(new KeyValuePair<long, string>(DateTimeOffset.Now.Ticks + FragmentCacheLifetimeSeconds * TimeSpan.TicksPerSecond, cacheKey));
                     }
 
                     int fragmentIndex = package.ReadInt();
                     int fragmentCount = package.ReadInt();
+                    if (fragmentCount <= 0 || fragmentCount > MaxFragments || fragmentIndex < 0 || fragmentIndex >= fragmentCount || configValueCache.Count > MaxOpenReassemblies)
+                    {
+                        configValueCache.Remove(cacheKey);
+                        Debug.LogWarning($"[{MyMod.PluginName}] Rejected config fragment for {Name} from peer {sender}: index {fragmentIndex} / count {fragmentCount} out of range or too many open reassemblies ({configValueCache.Count})");
+                        return false;
+                    }
                     fragments[fragmentIndex] = package.ReadByteArray();
+                    long reassembledBytes = 0;
+                    foreach (var f in fragments.Values) reassembledBytes += f.Length;
+                    if (reassembledBytes > MaxReassembledBytes)
+                    {
+                        configValueCache.Remove(cacheKey);
+                        Debug.LogWarning($"[{MyMod.PluginName}] Rejected config fragments for {Name} from peer {sender}: {reassembledBytes} bytes exceeds the {MaxReassembledBytes} cap");
+                        return false;
+                    }
 
                     if (fragments.Count < fragmentCount) return false;
 
@@ -235,7 +287,18 @@ namespace VerdantsAscent
                     using var input = new MemoryStream(package.ReadByteArray());
                     using var output = new MemoryStream();
                     using (var deflate = new DeflateStream(input, CompressionMode.Decompress))
-                        deflate.CopyTo(output);
+                    {
+                        var buffer = new byte[81920]; int n;
+                        while ((n = deflate.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            output.Write(buffer, 0, n);
+                            if (output.Length > MaxDecompressedBytes)
+                            {
+                                Debug.LogWarning($"[{MyMod.PluginName}] Rejected config package for {Name} from peer {sender}: decompressed size exceeds the {MaxDecompressedBytes} cap");
+                                return false;
+                            }
+                        }
+                    }
 
                     package = new ZPackage(output.ToArray());
                     flags = package.ReadByte();
@@ -283,7 +346,7 @@ namespace VerdantsAscent
 
                 if ((DateTime.Now - lastConfigLogTime).TotalSeconds > 12)
                 {
-                    Debug.Log($"[{MyMod.PluginName}] Received {parsed.configValues.Count} configs and {parsed.customValues.Count} custom values from {(isServer || clientUpdate ? $"client {sender}" : "server")} for mod {DisplayName ?? Name}");
+                    VabLog.Line($"[{MyMod.PluginName}] Received {parsed.configValues.Count} configs and {parsed.customValues.Count} custom values from {(isServer || clientUpdate ? $"client {sender}" : "server")} for mod {DisplayName ?? Name}");
                     lastConfigLogTime = DateTime.Now;
                 }
 
@@ -367,6 +430,12 @@ namespace VerdantsAscent
             var configs = allConfigs.ToDictionary(c => $"{c.BaseConfig.Definition.Section}*{c.BaseConfig.Definition.Key}", c => c);
 
             int count = package.ReadInt();
+            // SECURITY (10-23): never more entries than this mod syncs (plus slack for a newer peer's extra keys)
+            if (count < 0 || count > configs.Count + allCustomValues.Count + 64)
+            {
+                Debug.LogWarning($"[{MyMod.PluginName}] Got {count} config entries for mod {DisplayName ?? Name} (expected at most {configs.Count + allCustomValues.Count}), abort reading of received configs");
+                return new ParsedConfigs();
+            }
 
             for (int i = 0; i < count; i++)
             {
@@ -374,7 +443,24 @@ namespace VerdantsAscent
                 string key = package.ReadString();
                 string typeName = package.ReadString();
 
-                var type = Type.GetType(typeName);
+                // SECURITY (10-23): the type comes from OUR bound entry (section/key), never from the sender's name. A known entry
+                // only accepts its own type; an unknown one only a plain primitive / string (what a newer peer's extra key can be).
+                // Anything else aborts the read: the value's bytes can't be skipped safely, and an arbitrary type must never be built.
+                string expected = null;
+                if (section == "Internal")
+                {
+                    if (key == "lockexempt") expected = GetZPackageTypeString(typeof(bool));
+                    else if (allCustomValues.FirstOrDefault(v => v.Identifier == key) is CustomSyncedValueBase cv) expected = GetZPackageTypeString(cv.Type);
+                }
+                else if (configs.TryGetValue($"{section}*{key}", out var known)) expected = GetZPackageTypeString(configType(known.BaseConfig));
+                bool allowed = typeName == "" || typeName == expected || (expected == null && SafeUnknownTypes.Contains(typeName));
+                if (!allowed)
+                {
+                    Debug.LogWarning($"[{MyMod.PluginName}] Refused type {typeName} for {key} in section {section} for mod {DisplayName ?? Name} (expecting {expected ?? "a primitive or string"}), abort reading of received configs");
+                    return new ParsedConfigs();
+                }
+
+                var type = typeName == "" ? null : Type.GetType(typeName);
 
                 if (typeName == "" || type != null)
                 {
@@ -386,7 +472,12 @@ namespace VerdantsAscent
                     catch (InvalidDeserializationTypeException ex)
                     {
                         Debug.LogWarning($"[{MyMod.PluginName}] Got unexpected struct internal type {ex.received} for field {ex.field} struct {typeName} for {key} in section {section} for mod {DisplayName ?? Name}, expecting {ex.expected}");
-                        continue;
+                        return new ParsedConfigs();   // SECURITY (10-23): the rest of the package can't be read in step any more - abort, never continue
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[{MyMod.PluginName}] Could not read {key} in section {section} ({typeName}) for mod {DisplayName ?? Name}: {ex.Message}, abort reading of received configs");
+                        return new ParsedConfigs();
                     }
 
                     if (section == "Internal")
@@ -430,6 +521,17 @@ namespace VerdantsAscent
         }
 
         private static string GetZPackageTypeString(Type type) => type.AssemblyQualifiedName;
+
+        // SECURITY (10-23): the only types an UNKNOWN entry (a newer peer's extra key) may carry, and a cap on every received collection
+        private static readonly HashSet<string> SafeUnknownTypes = new HashSet<string>(new[] { typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double), typeof(string) }.Select(GetZPackageTypeString));
+        private const int MaxCollectionCount = 4096;
+
+        private static int ReadCollectionCount(ZPackage package)
+        {
+            int count = ReadCollectionCount(package);
+            if (count < 0 || count > MaxCollectionCount) throw new InvalidDeserializationTypeException { received = $"(collection of {count})", expected = $"(0..{MaxCollectionCount})", field = "count" };
+            return count;
+        }
 
         private static void AddValueToZPackage(ZPackage package, object value)
         {
@@ -498,7 +600,7 @@ namespace VerdantsAscent
 
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
             {
-                int count = package.ReadInt();
+                int count = ReadCollectionCount(package);
                 var dictType = type;
                 var pairType = typeof(KeyValuePair<,>).MakeGenericType(type.GenericTypeArguments);
 
@@ -676,7 +778,7 @@ namespace VerdantsAscent
                 {
                     if (Time.time > timeout)
                     {
-                        Debug.Log($"Disconnecting {peer.m_uid} after 30 seconds config sending timeout");
+                        VabLog.Line($"Disconnecting {peer.m_uid} after 30 seconds config sending timeout");
                         peer.m_rpc.Invoke("Error", ZNet.ConnectionStatus.ErrorConnectFailed);
                         ZNet.instance.Disconnect(peer);
                         break;
@@ -777,6 +879,10 @@ namespace VerdantsAscent
 
         [HarmonyPrefix]
         private static void Prefix(ZRpc __instance) => currentRpc = __instance;
+
+        // 1.0.148: cleared after, so outside a delivery this is null and can't name a stale sender
+        [HarmonyPostfix]
+        private static void Postfix() => currentRpc = null;
     }
 
     [HarmonyPatch(typeof(ZNet), "Awake")]
@@ -794,7 +900,7 @@ namespace VerdantsAscent
 
                 if (ConfigSync.isServer)
                 {
-                    Debug.Log($"[{MyMod.PluginName}] Registered '{configSync.Name} ConfigSync' RPC");
+                    VabLog.Line($"[{MyMod.PluginName}] Registered '{configSync.Name} ConfigSync' RPC");
                 }
             }
         }

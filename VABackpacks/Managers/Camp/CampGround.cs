@@ -47,13 +47,21 @@ namespace VerdantsAscent.Managers.Camp
             if (t == null) foreach (var a in AppDomain.CurrentDomain.GetAssemblies()) { t = a.GetType("VerdantsAscent.Terrain.Voxel.FatGroundProbe", false); if (t != null) break; }
             _voxelY = t?.GetMethod("VoxelSurfaceY", BindingFlags.Public | BindingFlags.Static, null,
                 new[] { typeof(float), typeof(float), typeof(float), typeof(float), typeof(float).MakeByRefType() }, null);
-            Debug.Log($"[VABackpacks] camp ground: {(_voxelY != null ? "FAT FatGroundProbe.VoxelSurfaceY (voxel edits seen)" : "no FAT probe: a ray onto the drawn ground (terrain + pieces)")}");
+            VabLog.Line($"[VABackpacks] camp ground: {(_voxelY != null ? "FAT FatGroundProbe.VoxelSurfaceY (voxel edits seen)" : "no FAT probe: a ray onto the drawn ground (terrain + pieces)")}");
         }
 
         /// <summary>The ground under (x, z) near `hint` y. Source "voxel" / "raycast &lt;layer&gt;" / "none".</summary>
         internal static bool Sample(float x, float z, float hint, out float y, out string source)
         {
             Look();
+            if (_groundMask == 0) _groundMask = LayerMask.GetMask("terrain", "Default", "static_solid", "piece");
+            // 1.0.129: in the halo-ring frame a ray along the ring's down (FAT's voxel probe and the heightmap read world y)
+            if (CampFrame.Active)
+            {
+                if (CampFrame.RayDown(x, z, hint + Reach, Reach * 2f, _groundMask, out y, out var col)) { source = "ring ray " + LayerMask.LayerToName(col.gameObject.layer); return true; }
+                y = hint; source = "none";
+                return false;
+            }
             if (_voxelY != null)
             {
                 try
@@ -133,7 +141,7 @@ namespace VerdantsAscent.Managers.Camp
                 // The probe's window centres on the generated ground at this x/z (only a HINT: the voxel read
                 // inside +-6 m is the answer, so edits still win); a saved spot's centre y + offset can be more than 6 m off on a steep site
                 float hint = want.y; string hintSrc = "spot y";
-                if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(at.x, want.y, at.z), out float gh)) { hint = gh; hintSrc = "generated ground"; }
+                if (!CampFrame.Active && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(at.x, want.y, at.z), out float gh)) { hint = gh; hintSrc = "generated ground"; }
                 if (!Spread(at, r, hint, out float y, out float spread, out string src)) { why = why ?? $"no ground read (hint {hint:0.00} from {hintSrc})"; continue; }
                 src += $", hint {hintSrc} {hint:0.00}";
                 if (spread > MaxSpread.Value && !pinned) { why = why ?? $"ground spread {spread:0.00} m"; continue; }

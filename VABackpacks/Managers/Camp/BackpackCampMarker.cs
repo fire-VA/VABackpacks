@@ -112,6 +112,8 @@ namespace VerdantsAscent.Managers.Camp
             var piece = GetComponent<Piece>();
             if (piece != null) piece.m_canBeRemoved = false;
             _hydrated = true;
+            // 1.0.151 (Fire 11-05 perf pass, hot path: this Update on every loaded camp chest): nothing left to do after hydrating, so it stops running
+            if (ConfigManager.Instance.configPerfCampMarkerUpdate.Value) enabled = false;
             // The bag leaning on the chest is local decoration, so every client adds its own when the chest loads
             // (before, only the deployer saw it, and only until the chest unloaded).
             try { BackpackCampManager.AttachBackpackVisualToChest(gameObject, BackpackPrefabName); }

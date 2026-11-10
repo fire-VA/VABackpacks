@@ -84,6 +84,9 @@ namespace VerdantsAscent.Managers
         public static bool Accepts(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData item)
         {
             if (item == null || !HasSlot(bag, kind) || BackpackManager.IsBackpack(item) || item == bag) return false;
+            // A bag upgrade fits its own slot kind and no other.
+            string upgradeSlot = BagUpgrades.SlotOf(item);
+            if (upgradeSlot != null) return upgradeSlot == kind;
             var t = item.m_shared.m_itemType;
             switch (kind)
             {
@@ -116,6 +119,13 @@ namespace VerdantsAscent.Managers
             inv.m_onChanged = (Action)Delegate.Combine(inv.m_onChanged, new Action(() => Save(owner, k, inv)));
             set.Inv[kind] = inv;
             return inv;
+        }
+
+        /// <summary>Saves the slot again after its item's own data changed (a bag upgrade's state).</summary>
+        internal static void Persist(ItemDrop.ItemData bag, string kind)
+        {
+            Inventory inv = GetInventory(bag, kind);
+            if (inv != null) Save(bag, kind, inv);
         }
 
         private static void Save(ItemDrop.ItemData bag, string kind, Inventory inv)
@@ -340,7 +350,7 @@ namespace VerdantsAscent.Managers
                                                                   && i.m_quality == __state.m_quality + 1 && !AnyStored(i) && !i.m_customData.ContainsKey("BackpackInventory"));
                 if (fresh == null) { Log.LogWarning($"{MyMod.PluginName}: upgraded {__state.m_dropPrefab.name} not found; contents stay on the old item"); return; }
                 CarryOver(__state, fresh);
-                Log.LogDebug($"{MyMod.PluginName}: {__state.m_dropPrefab.name} upgraded to quality {fresh.m_quality}; contents carried over ({__state.m_customData.Count} key(s))");
+                Log.LogInfo($"{MyMod.PluginName}: {__state.m_dropPrefab.name} upgraded to quality {fresh.m_quality}; contents carried over ({__state.m_customData.Count} key(s))");
             }
         }
     }

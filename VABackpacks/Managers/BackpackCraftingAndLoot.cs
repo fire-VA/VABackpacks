@@ -79,14 +79,14 @@ namespace VerdantsAscent.Managers
                 if (db.m_recipes.Exists(r => r != null && r.m_item == item)) continue;   // already added for this ObjectDB
                 if (!RecipeConfig.TryGetValue(b.Prefab, out ConfigEntry<string> entry) || string.IsNullOrWhiteSpace(entry.Value)) continue;
                 Recipe recipe = Parse(db, item, entry.Value, out string why);
-                if (recipe == null) { Debug.LogWarning($"{MyMod.PluginName}: no recipe for {b.Prefab}: {why}"); continue; }
+                if (recipe == null) { MyMod.Warn(db, $"{MyMod.PluginName}: no recipe for {b.Prefab}: {why}"); continue; }
                 UpgradeConfig.TryGetValue(b.Prefab, out ConfigEntry<string> up);
                 if (!ApplyUpgrade(db, recipe, up?.Value, out why)) Debug.LogWarning($"{MyMod.PluginName}: {b.Prefab} upgrade cost: {why}; using half the recipe");
                 VerdantsAscent.Managers.Camp.CampLevels.ApplyToRecipe(db, recipe, item);   // Quality = camp level
                 db.m_recipes.Add(recipe);
                 made++;
             }
-            if (made > 0) Debug.Log($"{MyMod.PluginName}: added {made} backpack recipe(s).");
+            if (made > 0) VabLog.Info($"{MyMod.PluginName}: added {made} backpack recipe(s).");
         }
 
         // Readable names; the bundle's m_name strings are leftovers (ExplorerBag_va read "FiresFirstBackpack").
@@ -214,7 +214,7 @@ namespace VerdantsAscent.Managers
                     touched.Add($"{prefab.name}<-{b.Prefab}({weight:0.###})");
                 }
             }
-            Debug.Log($"{MyMod.PluginName}: backpack chest loot (about 1 in {_oneChestIn.Value}): {(touched.Count == 0 ? "no matching chest prefabs" : string.Join(", ", touched.ToArray()))}");
+            VabLog.Line($"{MyMod.PluginName}: backpack chest loot (about 1 in {_oneChestIn.Value}): {(touched.Count == 0 ? "no matching chest prefabs" : string.Join(", ", touched.ToArray()))}");
             ChestBagRarity.LogAtLoad();   // Whether FloApi.Roll resolved, once
         }
 
@@ -246,8 +246,9 @@ namespace VerdantsAscent.Managers
             [HarmonyPriority(Priority.Low)]
             private static void Postfix(ObjectDB __instance)
             {
-                MyMod.AddItemsToObjectDB();   // the bags themselves may not be in this ObjectDB yet (idempotent)
-                AddRecipes(__instance);
+                // 1.0.132 (load/save audit M12): caught, so a throw never skips later ObjectDB.Awake postfixes
+                try { MyMod.AddItemsToObjectDB(); } catch (System.Exception e) { UnityEngine.Debug.LogWarning($"[VABackpacks] ObjectDB.Awake: AddItemsToObjectDB failed: {e}"); }   // the bags themselves may not be in this ObjectDB yet (idempotent)
+                try { AddRecipes(__instance); } catch (System.Exception e) { UnityEngine.Debug.LogWarning($"[VABackpacks] ObjectDB.Awake: AddRecipes failed: {e}"); }
             }
         }
 
@@ -255,7 +256,7 @@ namespace VerdantsAscent.Managers
         private static class ZNetScene_Awake
         {
             [HarmonyPriority(Priority.Low)]
-            private static void Postfix(ZNetScene __instance) => AddChestLoot(__instance);
+            private static void Postfix(ZNetScene __instance) { try { AddChestLoot(__instance); } catch (System.Exception e) { UnityEngine.Debug.LogWarning($"[VABackpacks] ZNetScene.Awake: AddChestLoot failed: {e}"); } }   // 1.0.132 M12
         }
     }
 }

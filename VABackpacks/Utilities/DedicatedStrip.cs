@@ -54,7 +54,7 @@ namespace VerdantsAscent.Utilities
             string biggest = string.Join(", ", meshes.OrderByDescending(m => Profiler.GetRuntimeMemorySizeLong(m)).Take(3)
                 .Select(m => $"{m.name} {Profiler.GetRuntimeMemorySizeLong(m) / 1048576f:0.0} MB").ToArray());
             Resources.UnloadUnusedAssets();
-            Debug.Log($"[{plugin}] dedicated strip: headless server, render-only data dropped from the bag prefabs: {filters} mesh filter(s) + {skinned} skinned mesh(es) " +
+            VabLog.Line($"[{plugin}] dedicated strip: headless server, render-only data dropped from the bag prefabs: {filters} mesh filter(s) + {skinned} skinned mesh(es) " +
                       $"({meshes.Count} meshes, {meshBytes / 1048576f:0.0} MB; biggest {biggest}), {renderers} renderer(s)' materials ({textures.Count} textures, {texBytes / 1048576f:0.0} MB); " +
                       $"{keptForColliders} mesh(es) kept for colliders; unused assets unloaded");
         }

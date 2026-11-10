@@ -147,6 +147,10 @@ namespace VerdantsAscent.Managers.Camp
         [HarmonyPatch(typeof(WearNTear), "Awake")]
         public static class WearNTear_Awake_AttachPatch
         {
+            // 1.0.153 ([generator], piece-create audit row 10, 11-08): only vanilla wood_stack can carry the camp marker, so every other
+            // WearNTear returns on the ZDO's prefab hash (a field read) before the marker's ZDO lookup.
+            private static readonly int s_woodStackHash = "wood_stack".GetStableHashCode();
+
             private static void Postfix(WearNTear __instance)
             {
                 if (__instance == null) return;
@@ -154,6 +158,7 @@ namespace VerdantsAscent.Managers.Camp
                 if (nview == null || !nview.IsValid()) return;
                 var zdo = nview.GetZDO();
                 if (zdo == null) return;
+                if (zdo.GetPrefab() != s_woodStackHash) return;
                 if (zdo.GetInt(KEY_MARKER, 0) != 1) return;
                 if (__instance.GetComponent<BackpackCampWoodPile>() == null)
                     __instance.gameObject.AddComponent<BackpackCampWoodPile>();

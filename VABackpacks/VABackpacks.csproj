@@ -15,6 +15,8 @@
     <Deterministic>true</Deterministic>
     <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- the Core DLL compiled against; override with /p:FiresCoreDll=... or the FiresCoreDll environment variable -->
+    <FiresCoreDll Condition=" '$(FiresCoreDll)' == '' ">..\..\FiresUnifiedCore\FiresUnifiedCore\bin\Release\FiresUnifiedCore.dll</FiresCoreDll>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -73,7 +75,7 @@
     <!-- FiresUnifiedCore — SOFT dependency, help-panel registration only.
          Call site is NoInlining-guarded behind a Chainloader check. -->
     <Reference Include="FiresUnifiedCore">
-      <HintPath>..\..\FiresUnifiedCore\FiresUnifiedCore\bin\Release\FiresUnifiedCore.dll</HintPath>
+      <HintPath>$(FiresCoreDll)</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="gui_framework">
@@ -132,61 +134,182 @@
     <Reference Include="UnityEngine.UI">
       <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\UnityEngine.UI.dll</HintPath>
     </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UIModule">
       <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\UnityEngine.UIModule.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="VabLog.cs" />
     <Compile Include="Ascend.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\AdminSyncing.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackApi.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackStatsSection.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BagBonusPatches.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackConfig.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackCraftingAndLoot.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackManager.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackSlotRail.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackSpecialSlots.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackSettingsPatches.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\ServerCampGate.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\BackpackWornVisual.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\BackpackCampManager.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampGround.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\Camp\CampFrame.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\BackpackCampMarker.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\BackpackCampRegistry.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\BackpackCampWoodPile.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\BlueprintLoader.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampCoverBypassPatch.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampGuildAccessPatch.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampImmortalPatch.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\GuildBridge.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampLevels.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampCapture.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampLayout.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampBuildProbe.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampTerrainCarry.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampChestCircle.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampRing.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampPieceCounter.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampStorage.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\WornBagGuard.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampInteractPatches.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampTerrain.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\CampVegetationSuppressPatch.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\Camp\HoboStickAttackPatch.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\ConfigManager.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\ConfigSync.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\VAItemManager.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\EarlyMagic.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\StaffIconRender.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgrades.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagWorkbench.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Featherweight.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Workbench.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Feeding.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Chef.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Magnet.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\TrophyPouch.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Bedroll.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\BedrollRug.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\RemoteAccessBridge.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\RemoteAccess.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Hopper.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Refill.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\RefillMenu.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\FuelPouch.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Smelter.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Kiln.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\FuelPouchHooks.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\FuelPouchWindow.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Compactor.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Void.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\BagPickerWindow.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\BagWindowEsc.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\BagWindowPlacement.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\FeedingPicker.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\VoidPicker.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\Deposit.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Managers\BagUpgradeOptions\ToolSwapper.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\StaffProjectiles.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\StaffAttackStyles.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\ChestBagRarity.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\VAPieceManager.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Managers\VARecipeManagerr.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Utilities\HoboStickPhysicsSetup.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Utilities\DedicatedStrip.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Utilities\LazyBagMeshes.cs" />
+    <Compile Include="VabLog.cs" />
+    <Compile Include="Utilities\BagMeshPreview.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="Utilities\VaBackpacksHelpContent.cs" />
+    <Compile Include="VabLog.cs" />
     <Compile Include="..\..\FiresUnifiedCore\FiresUnifiedCore\Materials\VanillaShaderRebind.cs">
       <Link>Utilities\VanillaShaderRebind.cs</Link>
     </Compile>

@@ -9,6 +9,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace VerdantsAscent.Managers
@@ -97,12 +98,15 @@ namespace VerdantsAscent.Managers
         // BonusProvider(bag) returns float[] { carryWeight, contentsWeightFactor, loadedSpeed, extraSlots } - index order
         // fixed, append-only; null = no bonus. contentsWeightFactor 1 = none, 0.8 = contents weigh 20 % less; loadedSpeed is
         // added to the movement modifier while the bag HAS contents; extraSlots is reserved (not applied).
-        // Without a provider nothing changes.
+        // The default provider is neutral, so VAInventory (which applies the contents factor only while a provider is set) also
+        // applies the bag upgrades' factor (Featherweight) without FRC. GetBonus multiplies that factor into whatever the provider returns.
 
         public const int BonusCarryWeight = 0, BonusContentsWeightFactor = 1, BonusLoadedSpeed = 2, BonusExtraSlots = 3;
         private const int BonusLength = 4;
 
-        public static Func<ItemDrop.ItemData, float[]> BonusProvider;
+        public static Func<ItemDrop.ItemData, float[]> BonusProvider = NeutralBonus;
+
+        private static float[] NeutralBonus(ItemDrop.ItemData bag) => null;
 
         /// <summary>Raised by RefreshBonus: a worn bag's bonus changed (re-roll, enchant, socket).</summary>
         public static event Action<Player> BonusChanged;
@@ -117,19 +121,22 @@ namespace VerdantsAscent.Managers
         public static float[] GetBonus(ItemDrop.ItemData bag)
         {
             var provider = BonusProvider;
-            if (provider == null || bag == null || !IsBackpack(bag)) return null;
-            float[] raw;
-            try { raw = provider(bag); }
-            catch (Exception ex)
+            if (bag == null || !IsBackpack(bag)) return null;
+            float[] raw = null;
+            if (provider != null)
             {
-                if (!s_bonusFailLogged) { s_bonusFailLogged = true; BonusLog.LogWarning($"BonusProvider threw {ex.GetType().Name}: {ex.Message} (logged once)"); }
-                return null;
+                try { raw = provider(bag); }
+                catch (Exception ex)
+                {
+                    if (!s_bonusFailLogged) { s_bonusFailLogged = true; BonusLog.LogWarning($"BonusProvider threw {ex.GetType().Name}: {ex.Message} (logged once)"); }
+                }
             }
-            if (raw == null) return null;
+            float upgradeFactor = FeatherweightOption.ContentsWeightFactor(bag);
+            if (raw == null && upgradeFactor >= 1f) return null;
             var b = new float[BonusLength];
             b[BonusContentsWeightFactor] = 1f;
-            for (int i = 0; i < BonusLength && i < raw.Length; i++) b[i] = raw[i];
-            b[BonusContentsWeightFactor] = Mathf.Clamp01(b[BonusContentsWeightFactor]);
+            if (raw != null) for (int i = 0; i < BonusLength && i < raw.Length; i++) b[i] = raw[i];
+            b[BonusContentsWeightFactor] = Mathf.Clamp01(b[BonusContentsWeightFactor]) * upgradeFactor;
             return b;
         }
 
@@ -303,6 +310,134 @@ namespace VerdantsAscent.Managers
         public static bool WriteSpecialSlot(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData item) => BackpackSpecialSlots.Write(bag, kind, item);
 
         public static bool SpecialSlotAccepts(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData item) => BackpackSpecialSlots.Accepts(bag, kind, item);
+
+        /// <summary>True for a bag upgrade item (it fits only its own slot kind and is destroyed, never returned, when swapped or removed).</summary>
+        public static bool IsBagUpgrade(ItemDrop.ItemData item) => BagUpgrades.IsUpgrade(item);
+
+        /// <summary>VAInventory's rail: a right-click on a slotted upgrade. True = an option handled it (no remove popup).</summary>
+        public static bool BagUpgradeRightClick(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData upgrade) => BagUpgrades.RaiseRightClick(bag, kind, upgrade);
+
+        /// <summary>VAInventory's rail: an item dropped onto a slotted upgrade. True = an option took it (the rest stays on the cursor).</summary>
+        public static bool BagUpgradeDropOnto(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData upgrade, ItemDrop.ItemData dropped, Inventory from)
+            => BagUpgrades.RaiseDropOnto(bag, kind, upgrade, dropped, from);
+
+        /// <summary>VAInventory's rail: the badge over a slotted upgrade ("" = none) and whether it warns (red, greyed icon).</summary>
+        public static string BagUpgradeBadge(ItemDrop.ItemData upgrade, out bool warn)
+        {
+            var r = BagUpgrades.RaiseBadge(upgrade);
+            warn = r?.warn ?? false;
+            return r?.text ?? "";
+        }
+
+        /// <summary>VAInventory's rail: just before it destroys a slotted upgrade (removed or swapped), so it can give back what it holds.</summary>
+        public static void BagUpgradeRemoving(ItemDrop.ItemData bag, string kind, ItemDrop.ItemData upgrade) => BagUpgrades.RaiseRemoving(bag, kind, upgrade);
+
+        /// <summary>VAInventory's rail: extra lines for the remove / swap confirm, or null.</summary>
+        public static string BagUpgradeRemoveWarning(ItemDrop.ItemData upgrade) => BagUpgrades.RaiseRemoveWarning(upgrade);
+
+        /// <summary>
+        /// VAInventory's bag-cell stack cap: the most of <paramref name="item"/> one cell of this worn bag may hold, from the bag's upgrades
+        /// (Trophy Pouch, Compactor); 0 = vanilla. Never below vanilla.
+        /// </summary>
+        public static int BagCellStackCap(Player player, ItemDrop.ItemData bag, ItemDrop.ItemData item)
+            => Math.Max(0, Math.Max(TrophyPouchOption.BagCellStackCap(player, bag, item), CompactorOption.BagCellStackCap(player, bag, item)));
+
+        // ── Remote Access: the bag's link to one storage network (Fire: "link/unlink our bag to certain storage networks") ──
+        // The link lives on the slotted Remote Access upgrade itself (m_customData "BagUp.RemoteAccess.link" = the terminal's id,
+        // ".linkName" = a label), so it travels with the bag. FiresStorageNetwork shows the Link / Unlink button on its terminal
+        // while the player wears such a bag, and uses the linked terminal as that bag's home.
+        private const string LinkKey = "BagUp.RemoteAccess.link", LinkNameKey = "BagUp.RemoteAccess.linkName";
+
+        /// <summary>True when the player wears a bag with Remote Access slotted (the terminal shows its Link / Unlink button).</summary>
+        public static bool HasRemoteAccess(Player player) => BagUpgrades.WornTier(player, RemoteAccessOption.UpgradeId) > 0;
+
+        /// <summary>The terminal id the worn Remote Access bag is linked to, or null when it isn't linked.</summary>
+        public static string GetRemoteAccessLink(Player player)
+        {
+            ItemDrop.ItemData up = RemoteAccessUpgrade(player, out _, out _);
+            return up != null && up.m_customData.TryGetValue(LinkKey, out string id) && !string.IsNullOrEmpty(id) ? id : null;
+        }
+
+        /// <summary>The label saved with the link (e.g. "Main base terminal"), or null.</summary>
+        public static string GetRemoteAccessLinkName(Player player)
+        {
+            ItemDrop.ItemData up = RemoteAccessUpgrade(player, out _, out _);
+            return up != null && up.m_customData.TryGetValue(LinkNameKey, out string n) ? n : null;
+        }
+
+        /// <summary>Links the worn Remote Access bag to a terminal (null id = unlink). False when no such bag is worn.</summary>
+        public static bool SetRemoteAccessLink(Player player, string terminalId, string label)
+        {
+            ItemDrop.ItemData up = RemoteAccessUpgrade(player, out ItemDrop.ItemData bag, out string kind);
+            if (up == null) return false;
+            if (string.IsNullOrEmpty(terminalId)) { up.m_customData.Remove(LinkKey); up.m_customData.Remove(LinkNameKey); }
+            else { up.m_customData[LinkKey] = terminalId; up.m_customData[LinkNameKey] = label ?? ""; }
+            BagUpgrades.SaveUpgradeState(bag, kind);
+            BonusLog.LogDebug($"[RemoteAccess] bag {(string.IsNullOrEmpty(terminalId) ? "unlinked" : $"linked to terminal {terminalId} ('{label}')")}");
+            return true;
+        }
+
+        private static ItemDrop.ItemData RemoteAccessUpgrade(Player player, out ItemDrop.ItemData bag, out string kind)
+        {
+            kind = null;
+            bag = BagUpgrades.WornBagWith(player, RemoteAccessOption.UpgradeId);
+            if (bag == null) return null;
+            foreach (string k in BackpackSpecialSlots.Kinds)
+            {
+                ItemDrop.ItemData it = BackpackSpecialSlots.Read(bag, k);
+                if (it?.m_dropPrefab != null && it.m_dropPrefab.name.StartsWith(BagUpgrades.PrefabPrefix + RemoteAccessOption.UpgradeId + "_", StringComparison.Ordinal)) { kind = k; return it; }
+            }
+            return null;
+        }
+
+        // ── Bag header buttons (Send home, Deposit, ...): options register, VAInventory draws them in the bag section's header ──
+        private sealed class HeaderButton
+        {
+            public string Id; public int Order;
+            public Func<ItemDrop.ItemData, bool> Visible; public Func<ItemDrop.ItemData, string> Label, Tooltip; public Action<ItemDrop.ItemData> Click;
+        }
+        private static readonly List<HeaderButton> s_headerButtons = new List<HeaderButton>();
+
+        /// <summary>Adds a pill to a worn bag's header row (right-aligned, lower order = further right). Re-registering an id replaces it.</summary>
+        public static void RegisterBagHeaderButton(string id, int order, Func<ItemDrop.ItemData, bool> visible, Func<ItemDrop.ItemData, string> label,
+            Func<ItemDrop.ItemData, string> tooltip, Action<ItemDrop.ItemData> click)
+        {
+            if (string.IsNullOrEmpty(id) || click == null) return;
+            s_headerButtons.RemoveAll(b => b.Id == id);
+            s_headerButtons.Add(new HeaderButton { Id = id, Order = order, Visible = visible, Label = label, Tooltip = tooltip, Click = click });
+            s_headerButtons.Sort((a, b) => a.Order.CompareTo(b.Order));
+        }
+
+        /// <summary>VAInventory: the visible header buttons for this bag, right to left, as { id, label, tooltip }.</summary>
+        public static List<string[]> GetBagHeaderButtons(ItemDrop.ItemData bag)
+        {
+            var list = new List<string[]>();
+            foreach (HeaderButton b in s_headerButtons)
+            {
+                try
+                {
+                    if (b.Visible != null && !b.Visible(bag)) continue;
+                    list.Add(new[] { b.Id, b.Label?.Invoke(bag) ?? b.Id, b.Tooltip?.Invoke(bag) ?? "" });
+                }
+                catch (Exception e) { BonusLog.LogWarning($"bag header button {b.Id} threw {e.Message}"); }
+            }
+            return list;
+        }
+
+        /// <summary>VAInventory: a header button was clicked.</summary>
+        public static void ClickBagHeaderButton(string id, ItemDrop.ItemData bag)
+        {
+            HeaderButton b = s_headerButtons.FirstOrDefault(x => x.Id == id);
+            if (b == null) return;
+            try { b.Click(bag); BonusLog.LogDebug($"bag header button '{id}' clicked"); }
+            catch (Exception e) { BonusLog.LogWarning($"bag header button {id} click threw {e.Message}"); }
+        }
+
+        /// <summary>VAInventory sets this: the items in one worn bag's cells.</summary>
+        public static void SetBagCellsProvider(Func<Player, ItemDrop.ItemData, List<ItemDrop.ItemData>> provider) => BagUpgrades.BagCellsProvider = provider;
+
+        /// <summary>VAInventory sets this: the free cell positions (player-inventory grid) of one worn bag (Magnet puts loot there).</summary>
+        public static void SetFreeBagCellsProvider(Func<Player, ItemDrop.ItemData, List<Vector2i>> provider) => MagnetOption.FreeBagCells = provider;
 
         /// <summary>Bumped on every special-slot change.</summary>
         public static int SpecialSlotsVersion => BackpackSpecialSlots.Version;

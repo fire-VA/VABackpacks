@@ -1,4 +1,4 @@
-﻿using BepInEx.Configuration;
+using BepInEx.Configuration;
 using HarmonyLib;
 using System;
 using System.Collections;
@@ -42,6 +42,7 @@ namespace VerdantsAscent.Managers
 
         // ────── Backpack Camp Settings ──────
         public ConfigEntry<bool>    configCampEnabled;
+        public ConfigEntry<bool>    configPerfCampCounterGui, configPerfCampMarkerUpdate, configPerfBagTickList, configPerfHopperWornCheck;
         public ConfigEntry<KeyCode> configCampGestureKey;
         public ConfigEntry<float>   configCampHoldDuration;
         public ConfigEntry<float>   configCampRadius;
@@ -116,6 +117,10 @@ namespace VerdantsAscent.Managers
             // campfire + workbench + the backpack as a chest. Hold Shift+E
             // for the same duration on the deployed chest to pack it back up.
             // One camp per character per server.
+            configPerfBagTickList = config.Bind("Performance", "Bag upgrade tick keeps its list", true, "On: the bag upgrades' per-frame tick reuses its subscriber list (hot path: Player.Update, one array a frame). Off: it builds the list every frame.");
+            configPerfHopperWornCheck = config.Bind("Performance", "Hopper worn check twice a second", true, "On: the Hopper asks whether it is worn at its own 0.5 s vacuum rate (hot path: Player.Update). Off: every frame.");
+            configPerfCampCounterGui = config.Bind("Performance", "Camp counter draws only when shown", true, "On: the camp piece counter's OnGUI runs only while a count shows (hot path: OnGUI every frame). Off: it runs every frame.");
+            configPerfCampMarkerUpdate = config.Bind("Performance", "Camp chest update stops after loading", true, "On: a camp chest's Update stops once it has loaded its data (hot path: Update per loaded camp chest). Off: it keeps running.");
             configCampEnabled = config.Bind(
                 "Backpacks.Camp", "Enabled", true,
                 "Enable the deploy-as-camp feature for backpacks dropped on the ground.");
@@ -339,7 +344,7 @@ namespace VerdantsAscent.Managers
             if ((DateTime.Now - _lastConfigUpdate).TotalMilliseconds < 2000) { _reloadCoroutine = null; yield break; }
             if (IsRecentSelfWrite()) { _reloadCoroutine = null; yield break; }
             _lastConfigUpdate = DateTime.Now;
-            Debug.Log($"{MyMod.PluginName}: Config file changed, reloading...");
+            VabLog.Line($"{MyMod.PluginName}: Config file changed, reloading...");
             var configFile = MyMod.Instance.Config;
             bool saveOnSet = configFile.SaveOnConfigSet;
             configFile.SaveOnConfigSet = false;
@@ -349,7 +354,7 @@ namespace VerdantsAscent.Managers
             VARecipeManager.UpdatePieceRequirements();
             BackpackManager.OnConfigReloaded();
             if (configVerboseLogging.Value)
-                Debug.Log($"{MyMod.PluginName}: Config reloaded and synced due to file change.");
+                VabLog.Line($"{MyMod.PluginName}: Config reloaded and synced due to file change.");
             _reloadCoroutine = null;
         }
 
@@ -368,7 +373,7 @@ namespace VerdantsAscent.Managers
             ValidateConfigs();
             VARecipeManager.UpdatePieceRequirements();
             if (configVerboseLogging.Value)
-                Debug.Log($"{MyMod.PluginName}: Config lock changed.");
+                VabLog.Line($"{MyMod.PluginName}: Config lock changed.");
         }
 
         public void Dispose()

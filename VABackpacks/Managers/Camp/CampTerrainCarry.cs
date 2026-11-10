@@ -41,7 +41,7 @@ namespace VerdantsAscent.Managers.Camp
                 _restorePre = t.GetMethod("RestorePreCamp", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(byte[]) }, null);
                 break;
             }
-            Debug.Log(_capture != null && _apply != null
+            VabLog.Line(_capture != null && _apply != null
                 ? "[VABackpacks] camp terrain: FatTerrainSnapshot found; camps carry their ground"
                 : "[VABackpacks] camp terrain: FatTerrainSnapshot not found (FAT missing or older than 0.2.860); camps keep their own level and paint");
             return _capture != null && _apply != null;
@@ -65,7 +65,7 @@ namespace VerdantsAscent.Managers.Camp
             try
             {
                 string line = _level.Invoke(null, new object[] { center, radius, y, paint }) as string;
-                if (why != null) Debug.Log($"[VABackpacks] {why} on voxel ground: {line}");
+                if (why != null) VabLog.Line($"[VABackpacks] {why} on voxel ground: {line}");
             }
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] voxel level ({why ?? "pad"}) failed: {(ex.InnerException ?? ex).Message}"); }
         }
@@ -77,7 +77,7 @@ namespace VerdantsAscent.Managers.Camp
             try
             {
                 var bytes = _capture.Invoke(null, new object[] { center, yaw, radius }) as byte[];
-                Debug.Log($"[VABackpacks] camp terrain captured: {(bytes == null ? "nothing (no voxel ground loaded)" : bytes.Length + " bytes")}, radius {radius:0.#} m, facing {yaw:0}");
+                VabLog.Line($"[VABackpacks] camp terrain captured: {(bytes == null ? "nothing (no voxel ground loaded)" : bytes.Length + " bytes")}, radius {radius:0.#} m, facing {yaw:0}");
                 return bytes == null ? null : Convert.ToBase64String(bytes);
             }
             catch (Exception ex)
@@ -91,11 +91,11 @@ namespace VerdantsAscent.Managers.Camp
         internal static void Apply(ItemDrop.ItemData bag, Vector3 center, float yaw)
         {
             if (bag?.m_customData == null || !bag.m_customData.TryGetValue(CustomDataKey, out var b64) || string.IsNullOrEmpty(b64)) return;
-            if (!Resolve()) { Debug.Log("[VABackpacks] camp terrain: the bag carries ground but FAT is missing; not applied (kept in the bag)"); return; }
+            if (!Resolve()) { VabLog.Line("[VABackpacks] camp terrain: the bag carries ground but FAT is missing; not applied (kept in the bag)"); return; }
             try
             {
                 string line = _apply.Invoke(null, new object[] { Convert.FromBase64String(b64), center, yaw }) as string;
-                Debug.Log($"[VABackpacks] camp terrain applied at facing {yaw:0}: {line}");
+                VabLog.Line($"[VABackpacks] camp terrain applied at facing {yaw:0}: {line}");
             }
             catch (Exception ex)
             {
@@ -110,7 +110,7 @@ namespace VerdantsAscent.Managers.Camp
             try
             {
                 var bytes = _capturePre.Invoke(null, new object[] { center, radius }) as byte[];
-                Debug.Log($"[VABackpacks] camp terrain write: none (step 0, pre-camp capture: {(bytes == null ? "nothing" : bytes.Length + " bytes")} at ({center.x:0.0},{center.z:0.0}) r {radius:0.#} m: heightmap + paint + voxel, for the pack-up)");
+                VabLog.Line($"[VABackpacks] camp terrain write: none (step 0, pre-camp capture: {(bytes == null ? "nothing" : bytes.Length + " bytes")} at ({center.x:0.0},{center.z:0.0}) r {radius:0.#} m: heightmap + paint + voxel, for the pack-up)");
                 return bytes == null ? null : Convert.ToBase64String(bytes);
             }
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] pre-camp capture failed: {(ex.InnerException ?? ex).Message}"); return null; }
@@ -127,7 +127,7 @@ namespace VerdantsAscent.Managers.Camp
                 // starts "ok" or "fail: <why>" ( 0.2.945): a fail falls back to the old restores
                 string line = _restorePre.Invoke(null, new object[] { Convert.FromBase64String(b64) }) as string ?? "fail: no answer";
                 bool ok = line.StartsWith("ok", StringComparison.OrdinalIgnoreCase);
-                Debug.Log(ok ? $"[VABackpacks] camp ground put back exactly ({why}, the pre-camp capture): {line}"
+                VabLog.Line(ok ? $"[VABackpacks] camp ground put back exactly ({why}, the pre-camp capture): {line}"
                              : $"[VABackpacks] pre-camp restore ({why}) said {line}; the old restore runs");
                 return ok;
             }
@@ -142,7 +142,7 @@ namespace VerdantsAscent.Managers.Camp
             try
             {
                 string line = _apply.Invoke(null, new object[] { Convert.FromBase64String(b64), center, yaw }) as string;
-                Debug.Log($"[VABackpacks] camp ground put back ({why}): {line}");
+                VabLog.Line($"[VABackpacks] camp ground put back ({why}): {line}");
             }
             catch (Exception ex) { Debug.LogWarning($"[VABackpacks] camp ground restore ({why}) failed: {(ex.InnerException ?? ex).Message}"); }
         }

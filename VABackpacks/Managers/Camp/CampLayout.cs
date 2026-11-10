@@ -36,6 +36,9 @@ namespace VerdantsAscent.Managers.Camp
         /// <summary>World pose -> camp-frame spot.</summary>
         internal static Spot ToSpot(Vector3 center, float campYaw, Vector3 pos, Quaternion rot)
         {
+            // 1.0.129: on a halo ring the pose is first turned into the ring's flat frame at the centre, so a layout saved there is the same
+            // flat layout a normal world saves (and a ring deploy maps it back through CampFrame)
+            if (CampFrame.InField(center)) { var flat = Quaternion.FromToRotation(CampFrame.UpAt(center), Vector3.up); pos = center + flat * (pos - center); rot = flat * rot; }
             Quaternion inv = Quaternion.Inverse(Facing(campYaw));
             return new Spot { Offset = inv * (pos - center), Yaw = Mathf.DeltaAngle(campYaw, rot.eulerAngles.y) };
         }

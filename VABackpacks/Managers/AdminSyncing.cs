@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -79,6 +79,9 @@ namespace VerdantsAscent
                 return;
             }
 
+            // Client: only the SERVER may mark this client lock-exempt (SECURITY 10-24: any peer could send it before)
+            if (ZRoutedRpc.instance == null || sender != ZRoutedRpc.instance.GetServerPeerID()) return;
+
             // Client: Receive admin status
             try
             {
@@ -87,7 +90,7 @@ namespace VerdantsAscent
                 ConfigSync.RefreshReadOnlyFlagsForAll();
 
                 if (ConfigManager.Instance.configVerboseLogging.Value)
-                    Debug.Log($"{MyMod.PluginName}: Admin status received: {(isAdmin ? "ADMIN" : "NON-ADMIN")}");
+                    VabLog.Info($"{MyMod.PluginName}: Admin status received: {(isAdmin ? "ADMIN" : "NON-ADMIN")}");
 
                 // Call the method on the plugin instance
                 MyMod.Instance?.GetType()

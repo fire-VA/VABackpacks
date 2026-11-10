@@ -40,7 +40,7 @@ namespace VerdantsAscent.Managers.Camp
             if (_pieceCap.Value.Replace(" ", "") == "100,200,300,500")
             {
                 _pieceCap.Value = "500,1000,1500,2000";
-                Debug.Log("[VABackpacks] camp piece caps moved from the old default 100,200,300,500 to 500,1000,1500,2000");
+                VabLog.Line("[VABackpacks] camp piece caps moved from the old default 100,200,300,500 to 500,1000,1500,2000");
             }
             _level3Extra = cfg.Bind("Camp", "Level3Extra", "Iron:5", "Extra cost to upgrade a bag to quality 3, as Item:amount pairs. Empty = none.");
             _level4Extra = cfg.Bind("Camp", "Level4Extra", "Silver:5", "Extra cost to upgrade a bag to quality 4, as Item:amount pairs. Empty = none.");

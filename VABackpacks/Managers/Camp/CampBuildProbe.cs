@@ -31,7 +31,7 @@ namespace VerdantsAscent.Managers.Camp
             string key = $"{status}|{need}|{stationOk}";
             if (key == _last) return;
             _last = key;
-            Debug.Log($"[VABackpacks] camp build probe: {Utils.GetPrefabName(ghost)} placement {status}; needs station {need}, in range {stationOk}");
+            VabLog.Line($"[VABackpacks] camp build probe: {Utils.GetPrefabName(ghost)} placement {status}; needs station {need}, in range {stationOk}");
         }
     }
 }
