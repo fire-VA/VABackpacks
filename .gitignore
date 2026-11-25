@@ -56,3 +56,4 @@ desktop.ini
 
 # the ~80 MB asset bundle: shipped in release downloads, not stored in the repo
 **/plugins/VABackpacks/vabackpacks
+VABackpacks/Refs/PUBLIC_TEST_PATCH_READINESS.md

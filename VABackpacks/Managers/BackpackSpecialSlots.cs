@@ -69,6 +69,19 @@ namespace VerdantsAscent.Managers
         public static string[] SlotsFor(string prefabName)
             => prefabName != null && SlotsByPrefab.TryGetValue(prefabName, out string[] s) ? s : None;
 
+        // 1.0.154 ([wishbone], lead 11-13 profiler: AnyStored / GetInventory / Weight_Patch = ~10 MB/min): the
+        // customData keys are built once (was KeyPrefix + kind per check, 3 per GetWeight), and a bag's slot list is cached per
+        // drop prefab OBJECT (was m_dropPrefab.name, which allocates a new string on every Unity read). Same answers.
+        private static readonly string[] KindKeys = { KeyPrefix + SlotTool, KeyPrefix + SlotResources, KeyPrefix + SlotBypass };
+        private static readonly Dictionary<GameObject, string[]> SlotsByPrefabObject = new Dictionary<GameObject, string[]>();
+        private static string[] SlotsForBag(ItemDrop.ItemData bag)
+        {
+            GameObject prefab = bag?.m_dropPrefab;
+            if (prefab == null) return None;
+            if (!SlotsByPrefabObject.TryGetValue(prefab, out string[] s)) SlotsByPrefabObject[prefab] = s = SlotsFor(prefab.name);
+            return s;
+        }
+
         /// <summary>The slots this bag has right now: none below quality 2.</summary>
         public static string[] GetSpecialSlots(ItemDrop.ItemData bag)
         {
@@ -105,8 +118,8 @@ namespace VerdantsAscent.Managers
         /// <summary>The 1x1 inventory behind a slot (created and loaded on first use), or null when the bag has no such slot kind.</summary>
         internal static Inventory GetInventory(ItemDrop.ItemData bag, string kind)
         {
-            if (bag?.m_dropPrefab == null || Array.IndexOf(SlotsFor(bag.m_dropPrefab.name), kind) < 0) return null;
-            SlotSet set = Sets.GetOrCreateValue(bag);
+            if (bag?.m_dropPrefab == null || Array.IndexOf(SlotsForBag(bag), kind) < 0) return null;
+            if (!Sets.TryGetValue(bag, out SlotSet set)) set = Sets.GetOrCreateValue(bag);
             if (set.Inv.TryGetValue(kind, out Inventory inv)) return inv;
             inv = new Inventory("$vab_slot_" + kind, null, 1, 1);
             if (bag.m_customData != null && bag.m_customData.TryGetValue(KeyPrefix + kind, out string data) && !string.IsNullOrEmpty(data))
@@ -160,8 +173,8 @@ namespace VerdantsAscent.Managers
         private static bool AnyStored(ItemDrop.ItemData bag)
         {
             if (bag?.m_customData == null || bag.m_customData.Count == 0) return false;
-            foreach (string kind in Kinds)
-                if (bag.m_customData.ContainsKey(KeyPrefix + kind)) return true;
+            for (int i = 0; i < KindKeys.Length; i++)
+                if (bag.m_customData.ContainsKey(KindKeys[i])) return true;
             return false;
         }
 
@@ -237,7 +250,7 @@ namespace VerdantsAscent.Managers
             public static void Postfix(ItemDrop.ItemData __instance, ref float __result)
             {
                 if (!AnyStored(__instance) || !BackpackManager.IsBackpack(__instance)) return;
-                foreach (string kind in SlotsFor(__instance.m_dropPrefab.name))
+                foreach (string kind in SlotsForBag(__instance))
                 {
                     ItemDrop.ItemData it = Read(__instance, kind);
                     if (it == null) continue;

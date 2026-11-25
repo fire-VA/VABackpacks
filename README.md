@@ -3,6 +3,16 @@
 Real backpacks with real storage for Valheim. Five bags you can craft or find, upgrade at the workbench, and unpack
 into a full camp wherever you stop for the night. Part of the Fires mod family.
 
+## What's new in 1.0.153
+
+- **Less work in the background, same game.** The camp's piece counter only draws while it is on screen, a camp
+  chest stops checking itself once it has loaded, and building pieces load a little faster. Nothing you see or do
+  changes.
+- **New [Performance] settings.** Each of these savings has its own switch, all on by default: "Bag upgrade tick
+  keeps its list", "Hopper worn check twice a second", "Camp counter draws only when shown" and "Camp chest update
+  stops after loading". You only need them if you want to turn one off.
+- **Quieter log.** Routine messages only show when debug logging is on.
+
 ## What you get
 
 - **Five bags.** The Small Bag, Day Bag and Explorer Bag are worn on your shoulder and show on your back, cape or not.
@@ -24,8 +34,8 @@ into a full camp wherever you stop for the night. Part of the Fires mod family.
 - **Bag perks** (set per bag in the config, all off by default): cold and wet resistance, feather fall, extra carry
   strength.
 - **Early magic staffs** (off by default, turn on `[Early Magic] Enabled`): ten early staffs and five eitr foods. With
-  `Staff Attack Styles` on, each staff has its own primary and secondary attack; placed attacks show a ground ring you
-  aim and left click to cast.
+  `Staff Attack Styles` on, each staff has its own primary and secondary attack. For ring spells, hold the middle
+  mouse button to aim the ground ring and release to cast; blocking, Escape, right click or switching staff cancels.
 
 ## How to use
 
@@ -52,17 +62,9 @@ into a full camp wherever you stop for the night. Part of the Fires mod family.
 
 - Settings are in `BepInEx/config/com.Fire.VA_Backpacks.cfg`. Things you might change: the open key, each bag's
   size (rows and columns), bag perks, speed and whether it can go through portals, recipes, how often bags show up
-  in chests, and camp sizes.
+  in chests, and camp sizes. The [Performance] section can stay as it is.
 - On a server, recipes, chest loot and camp settings come from the server. Bag sizes and perks come from each
   player's own config, so share the same config with your group if you want everyone's bags to match.
-
-## Building from source
-
-The project in `VABackpacks/` targets .NET Framework 4.8. Point the references at your Valheim install
-(`valheim_Data/Managed`, with a publicized `assembly_valheim`), BepInEx, Harmony and a FiresUnifiedCore build,
-then build in Release.
-
-The asset bundle `vabackpacks` (about 80 MB) is not stored in this repository. Build it from the mod's Unity project (AssetBundle build, Standalone Windows) or copy it out of a released VABackpacks download, and place it next to the built `VABackpacks.dll` in the plugin folder (the mod loads it from there at runtime).
 
 ## Issues / questions
 
