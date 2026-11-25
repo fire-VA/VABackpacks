@@ -1,3 +1,7 @@
+## 1.0.155
+Requires Valheim 1.0.30 or newer.
+- Works with Valheim 1.0.30 (camp pack-up reads the new game data).
+
 ## 1.0.154
 
 ### Changed

@@ -1,5 +1,7 @@
 # VABackpacks
 
+**Requires Valheim 1.0.30 or newer.**
+
 Real backpacks with real storage for Valheim. Five bags you can craft or find, upgrade at the workbench, and unpack
 into a full camp wherever you stop for the night. Part of the Fires mod family.
 

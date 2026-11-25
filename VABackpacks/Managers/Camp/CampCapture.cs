@@ -280,13 +280,13 @@ namespace VerdantsAscent.Managers.Camp
         // Connections (portal pairs) are not carried: their ZDOIDs mean nothing at a new spot.
         private static string ReadData(ZDOID id)
         {
-            List<KeyValuePair<int, float>> floats = null;
-            List<KeyValuePair<int, Vector3>> vecs = null;
-            List<KeyValuePair<int, Quaternion>> quats = null;
-            List<KeyValuePair<int, int>> ints = null;
-            List<KeyValuePair<int, long>> longs = null;
-            List<KeyValuePair<int, string>> strings = null;
-            List<KeyValuePair<int, byte[]>> bytes = null;
+            FastIterableKeyValues<int, float> floats;
+            FastIterableKeyValues<int, Vector3> vecs;
+            FastIterableKeyValues<int, Quaternion> quats;
+            FastIterableKeyValues<int, int> ints;
+            FastIterableKeyValues<int, long> longs;
+            FastIterableKeyValues<int, string> strings;
+            FastIterableKeyValues<int, byte[]> bytes;
             ZDOConnection connection = null;
             ZDOExtraData.GetData(id, out floats, out vecs, out quats, out ints, out longs, out strings, out bytes, out connection);
 
@@ -311,9 +311,9 @@ namespace VerdantsAscent.Managers.Camp
             return pkg.GetBase64();
         }
 
-        private static bool Any<T>(List<T> list) => list != null && list.Count > 0;
+        private static bool Any<T>(FastIterableKeyValues<int, T> list) => list.Count > 0;   // 1.0.30: GetData hands back FastIterableKeyValues (a struct: Count + indexer)
 
-        private static void Write<T>(ZPackage pkg, List<KeyValuePair<int, T>> list, Action<ZPackage, T> write)
+        private static void Write<T>(ZPackage pkg, FastIterableKeyValues<int, T> list, Action<ZPackage, T> write)
         {
             int n = Math.Min(list.Count, 255);
             pkg.Write((byte)n);
